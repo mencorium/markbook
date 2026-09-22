@@ -1,4 +1,4 @@
-# /markbook_desktop/backend/services/records.py
+# /markbook/backend/services/records.py
 """Settings, classes, subjects and students."""
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class ValidationError(ValueError):
 
 # ---------------- settings ----------------
 DEFAULT_SETTINGS = {"school": "", "term": "", "ca_weight": 40, "head_teacher": "", "next_term": "",
-                    "auto_backup": True, "backup_dir": "", "last_backup": ""}
+                    "auto_backup": True, "backup_dir": "", "last_backup": "", "pg_bin_dir": ""}
 
 
 def get_settings() -> dict:

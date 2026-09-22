@@ -40,22 +40,88 @@ class BackupFile:
         return f"{kb:.0f} KB" if kb < 1024 else f"{kb / 1024:.1f} MB"
 
 
+def _exe(name: str) -> str:
+    return f"{name}.exe" if os.name == "nt" else name
+
+
+def _registry_dirs() -> list[str]:
+    """Windows installers record where PostgreSQL went; ask the registry rather than guessing."""
+    if os.name != "nt":
+        return []
+    out = []
+    try:
+        import winreg
+        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                key = winreg.OpenKey(root, r"SOFTWARE\PostgreSQL\Installations")
+            except OSError:
+                continue
+            with key:
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        with winreg.OpenKey(key, winreg.EnumKey(key, i)) as sub:
+                            base, _ = winreg.QueryValueEx(sub, "Base Directory")
+                            out.append(str(Path(base) / "bin"))
+                    except OSError:
+                        continue
+    except Exception as e:  # noqa: BLE001 - never let a registry quirk stop a backup
+        log.debug("registry lookup failed: %s", e)
+    return out
+
+
+def configured_bin_dir() -> str:
+    """A folder set by the user in Settings (or MARKBOOK_PG_BIN) wins over anything found automatically."""
+    env = os.getenv("MARKBOOK_PG_BIN", "").strip()
+    if env:
+        return env
+    try:
+        from .records import get_settings
+        return (get_settings().get("pg_bin_dir") or "").strip()
+    except Exception:  # noqa: BLE001 - settings may not be readable yet at startup
+        return ""
+
+
 def find_tool(name: str) -> str | None:
-    """pg_dump/pg_restore from PATH, or the usual install locations on Linux and Windows."""
+    """The folder set in Settings, then PATH, then the usual install locations (all drives on Windows)."""
+    chosen = configured_bin_dir()
+    if chosen:
+        candidate = Path(chosen) / _exe(name)
+        if candidate.exists():
+            return str(candidate)
+        log.warning("PostgreSQL bin folder set to %s but %s is not in it", chosen, _exe(name))
     found = shutil.which(name)
     if found:
         return found
-    patterns = [f"/usr/lib/postgresql/*/bin/{name}", f"/usr/local/pgsql/bin/{name}", f"/opt/homebrew/bin/{name}",
-                rf"C:\Program Files\PostgreSQL\*\bin\{name}.exe", rf"C:\Program Files (x86)\PostgreSQL\*\bin\{name}.exe"]
+    patterns = [f"/usr/lib/postgresql/*/bin/{name}", f"/usr/local/pgsql/bin/{name}", f"/usr/pgsql-*/bin/{name}",
+                f"/opt/homebrew/bin/{name}", f"/Library/PostgreSQL/*/bin/{name}",
+                f"/Applications/Postgres.app/Contents/Versions/*/bin/{name}"]
+    if os.name == "nt":
+        drives = [f"{d}:" for d in "CDEFGHIJKLMNOPQRSTUVWXYZ" if Path(f"{d}:\\").exists()]
+        folders = [r"Program Files\PostgreSQL", r"Program Files (x86)\PostgreSQL", "PostgreSQL", r"pgsql"]
+        patterns = [str(Path(d + "\\") / f / "*" / "bin" / _exe(name)) for d in drives for f in folders]
+        patterns += [str(Path(d + "\\") / f / "bin" / _exe(name)) for d in drives for f in folders]
+        patterns += [str(Path(r) / _exe(name)) for r in _registry_dirs()]
     for pattern in patterns:
         hits = sorted(glob(pattern))
         if hits:
-            return hits[-1]
+            return hits[-1]                      # the newest version installed
     return None
 
 
 def tools_available() -> bool:
     return bool(find_tool("pg_dump") and find_tool("pg_restore"))
+
+
+def check_bin_dir(folder: str | Path) -> str | None:
+    """Returns a complaint if this folder is not a PostgreSQL bin folder, else None."""
+    folder = Path(folder)
+    missing = [n for n in ("pg_dump", "pg_restore") if not (folder / _exe(n)).exists()]
+    return None if not missing else f"{folder} does not contain {' or '.join(_exe(m) for m in missing)}."
+
+
+MISSING_HINT = ("pg_dump was not found. It is installed with PostgreSQL — in Settings → Backups, press "
+                "\"Locate PostgreSQL tools…\" and choose its bin folder (for example "
+                "C:\\Program Files\\PostgreSQL\\16\\bin), or add that folder to PATH.")
 
 
 def _conn() -> tuple[list[str], dict, str]:
@@ -85,7 +151,7 @@ def backup(folder: str | Path | None = None, label: str = "") -> Path:
     """Write a timestamped backup and return its path."""
     tool = find_tool("pg_dump")
     if not tool:
-        raise BackupError("pg_dump was not found. It comes with PostgreSQL — add its bin folder to PATH, then try again.")
+        raise BackupError(MISSING_HINT)
     folder = Path(folder) if folder else backups_dir()
     folder.mkdir(parents=True, exist_ok=True)
     stem = f"markbook-{dt.datetime.now():%Y-%m-%d-%H%M%S}{('-' + label) if label else ''}"
@@ -104,7 +170,7 @@ def restore(path: str | Path) -> None:
     """Replace the current contents of the database with this backup."""
     tool = find_tool("pg_restore")
     if not tool:
-        raise BackupError("pg_restore was not found. It comes with PostgreSQL — add its bin folder to PATH, then try again.")
+        raise BackupError(MISSING_HINT.replace("pg_dump", "pg_restore"))
     path = Path(path)
     if not path.exists():
         raise BackupError(f"{path.name} no longer exists.")

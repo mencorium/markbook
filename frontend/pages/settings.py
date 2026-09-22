@@ -13,6 +13,8 @@ from backend.grading import LEVEL_LABELS, PRESETS
 from backend.services import backup as BK
 from backend.services import records as R
 
+from pathlib import Path
+
 from ..dialogs import ClassDialog, ScaleDialog
 from ..widgets import Page, Table, confirm, error, fill_combo, info, label, panel, row, safe
 
@@ -82,13 +84,15 @@ class SettingsPage(Page):
         now = QPushButton("Back up now")
         now.setObjectName("primary")
         now.clicked.connect(lambda _=False: self.backup_now())
+        self.b_locate = QPushButton("Locate PostgreSQL tools…")
+        self.b_locate.clicked.connect(lambda _=False: self.locate_tools())
         self.b_restore = QPushButton("Restore selected backup")
         self.b_restore.setObjectName("danger")
         self.b_restore.clicked.connect(lambda _=False: self.restore_selected())
         self.backup_status = label("", "notice", wrap=True)
         self.backups = Table(["When", "File", "Size"], stretch=1)
         self.body.addWidget(panel(self.backup_status, self.auto, row(label("Folder"), self.folder, browse, open_folder),
-                                  row(now, self.b_restore, None), self.backups,
+                                  row(now, self.b_restore, self.b_locate, None), self.backups,
                                   label("A backup is one .dump file holding everything: students, marks, attendance and settings. "
                                         "Restoring replaces the current contents of the database with that file. The newest 20 backups are kept.",
                                         "muted", wrap=True),
@@ -126,13 +130,15 @@ class SettingsPage(Page):
                               [str(b.path) for b in files], center_from=2, fit_height=True)
         self.b_restore.setEnabled(bool(files))
         last = s.get("last_backup") or ""
+        found = BK.find_tool("pg_dump")
+        self.b_locate.setVisible(True)
         if not BK.tools_available():
             self.backup_status.setObjectName("note")
-            text = ("pg_dump was not found, so backups cannot run here. It is installed with PostgreSQL — "
-                    "add its bin folder to PATH. Until then, back up with pg_dump from a terminal.")
+            text = ("PostgreSQL's pg_dump was not found, so backups cannot run yet. Press \"Locate PostgreSQL tools…\" "
+                    "and choose the 'bin' folder of your PostgreSQL installation (for example C:\\Program Files\\PostgreSQL\\16\\bin).")
         elif files:
             self.backup_status.setObjectName("noticeDone")
-            text = f"Last backup: {files[0].when:%d %b %Y at %H:%M} · {len(files)} kept in this folder."
+            text = f"Last backup: {files[0].when:%d %b %Y at %H:%M} · {len(files)} kept in this folder. Using {found}."
         else:
             self.backup_status.setObjectName("notice")
             text = "No backups yet. Press Back up now, or leave the automatic backup switched on." + (f" Last recorded: {last}." if last else "")
@@ -146,6 +152,21 @@ class SettingsPage(Page):
             self.folder.setText(chosen)
             self._save_backup_prefs()
             self._load_backups()
+
+    @safe
+    def locate_tools(self):
+        """Point Markbook at the PostgreSQL bin folder when it is not on PATH (common on Windows)."""
+        start = BK.configured_bin_dir() or (str(Path(BK.find_tool("pg_dump")).parent) if BK.find_tool("pg_dump") else "")
+        chosen = QFileDialog.getExistingDirectory(self, "Choose the PostgreSQL 'bin' folder", start)
+        if not chosen:
+            return
+        complaint = BK.check_bin_dir(chosen)
+        if complaint:
+            return error(self, complaint + "\n\nLook for a folder called 'bin' inside your PostgreSQL installation, "
+                                "for example C:\\Program Files\\PostgreSQL\\16\\bin.")
+        R.save_settings({"pg_bin_dir": chosen})
+        self.app.reload()
+        info(self, f"Using the PostgreSQL tools in {chosen}. Backups can run now.")
 
     @safe
     def backup_now(self):

@@ -1,4 +1,4 @@
-<!-- /markbook/README.md -->
+<!-- /markbook_desktop/README.md -->
 # Markbook Desktop
 
 Student progress analysis for teachers and tutors: PyQt6 desktop app with a PostgreSQL database.
@@ -46,8 +46,11 @@ Remove the sample data at any time with `python -m backend.seed --remove` or fro
 **Backups.** Settings → Backups: back up now, choose the folder, or restore an earlier backup.
 Markbook also backs up once a day when you close it (switchable). Each backup is one compressed
 `.dump` file holding everything; the newest 20 are kept. Restoring first takes a `before-restore`
-backup of the current data, so even a mistaken restore is recoverable. This needs `pg_dump` and
-`pg_restore` on PATH — they come with PostgreSQL.
+backup of the current data, so even a mistaken restore is recoverable. This needs `pg_dump` and `pg_restore`, which come with PostgreSQL. Markbook looks on PATH and in
+the usual install folders (including the Windows registry and every drive). If they still aren't
+found — common on Windows — press **Locate PostgreSQL tools…** in Settings → Backups and choose
+the `bin` folder of your PostgreSQL installation, e.g. `C:\Program Files\PostgreSQL\16\bin`.
+`MARKBOOK_PG_BIN` overrides both.
 
 **Autosave.** Marks typed into the grid are autosaved to a draft file a moment after you stop
 typing. If the app closes, the laptop dies or the power goes out, the next time you open that

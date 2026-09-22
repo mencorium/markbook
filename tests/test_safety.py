@@ -1,6 +1,7 @@
 # /markbook/tests/test_safety.py
 """Migrations, backups and autosaved drafts — the features that protect a term's marks."""
 import datetime as dt
+from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect
@@ -73,8 +74,30 @@ def test_backup_then_restore_brings_data_back(tmp_path):
 
 def test_backup_reports_a_readable_error_when_the_tool_is_missing(monkeypatch):
     monkeypatch.setattr(BK, "find_tool", lambda name: None)
-    with pytest.raises(BK.BackupError, match="pg_dump"):
+    with pytest.raises(BK.BackupError, match="Locate PostgreSQL tools"):
         BK.backup()
+
+
+def test_postgres_tools_can_be_located_by_hand(monkeypatch, tmp_path):
+    """On Windows the tools are usually not on PATH, so a folder chosen in Settings must win."""
+    real = BK.find_tool("pg_dump")
+    if not real:
+        pytest.skip("no PostgreSQL tools installed")
+    bin_dir = str(Path(real).parent)
+    assert BK.check_bin_dir(bin_dir) is None
+    assert BK.check_bin_dir(tmp_path) and "pg_dump" in BK.check_bin_dir(tmp_path)
+
+    monkeypatch.setenv("MARKBOOK_PG_BIN", bin_dir)
+    assert BK.find_tool("pg_dump") == str(Path(bin_dir) / Path(real).name)
+
+    monkeypatch.setenv("MARKBOOK_PG_BIN", str(tmp_path))     # wrong folder: fall back, don't break
+    assert BK.find_tool("pg_dump") is not None
+
+    monkeypatch.delenv("MARKBOOK_PG_BIN")
+    R.save_settings({"pg_bin_dir": bin_dir})                 # the setting Settings writes
+    assert BK.configured_bin_dir() == bin_dir
+    assert BK.tools_available()
+    R.save_settings({"pg_bin_dir": ""})
 
 
 def test_drafts_survive_a_crash_and_are_cleared_on_save():
