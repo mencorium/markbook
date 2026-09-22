@@ -9,7 +9,7 @@ from backend.phone import display_phone
 from backend.services import records as R
 from backend.services.analytics import TREND_WORDS
 
-from ..dialogs import BulkStudentsDialog, StudentDialog
+from ..dialogs import BulkStudentsDialog, ClassDialog, StudentDialog
 from ..widgets import Page, Table, confirm, error, fill_combo, fmt, info, label, panel, row, safe
 
 
@@ -26,7 +26,9 @@ class StudentsPage(Page):
         add.clicked.connect(lambda _=False: self.add())
         bulk.clicked.connect(lambda _=False: self.bulk())
         self.b_del.clicked.connect(lambda _=False: self.delete_selected())
-        for w in (label("Class"), self.cls, self.b_del, bulk, add):
+        new_class = QPushButton("Add class")
+        new_class.clicked.connect(lambda _=False: self.add_class())
+        for w in (label("Class"), self.cls, new_class, self.b_del, bulk, add):
             self.actions.addWidget(w)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search name, reg. no. or phone")
@@ -57,6 +59,16 @@ class StudentsPage(Page):
         if d.exec():
             s = R.save_student(None, **d.values())
             self.app.class_id = s.class_id
+            self.app.reload()
+
+    @safe
+    def add_class(self):
+        d = ClassDialog(self, [n for n, _ in self.app.class_items()])
+        if d.exec():
+            v = d.values()
+            cls = R.get_or_create_class(v["name"])
+            R.save_class(cls.id, name=v["name"], level=v["level"], pass_mark=v["pass_mark"], teacher=v["teacher"], scale=None)
+            self.app.class_id = cls.id
             self.app.reload()
 
     @safe

@@ -8,6 +8,7 @@ from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLineEdit,
                              QPlainTextEdit, QTableWidgetItem, QVBoxLayout)
 
+from backend.grading import LEVEL_LABELS, PRESETS
 from backend.phone import PhoneError, display_phone, normalize_phone
 from backend.services.assessments import TYPES
 
@@ -92,6 +93,52 @@ class BulkStudentsDialog(_Form):
 
     def validate(self):
         return None if self.text.toPlainText().strip() and self.cls.currentText().strip() else "Enter at least one name and a class."
+
+
+class ClassDialog(_Form):
+    """Create a class (or edit its name, teacher and grading)."""
+    def __init__(self, parent, existing_names: list[str], cls=None):
+        super().__init__(parent, "Edit class" if cls else "Add a class")
+        self.existing = [n.lower() for n in existing_names if not cls or n.lower() != cls.name.lower()]
+        self.name = QLineEdit(cls.name if cls else "")
+        self.name.setPlaceholderText("e.g. Form Five A")
+        self.teacher = QLineEdit(cls.teacher if cls else "")
+        self.teacher.setPlaceholderText("optional")
+        self.level = QComboBox()
+        for key, text in LEVEL_LABELS.items():
+            self.level.addItem(text, key)
+        self.pass_mark = QDoubleSpinBox()
+        self.pass_mark.setRange(0, 100)
+        self.pass_mark.setSuffix("%")
+        self.level.currentIndexChanged.connect(self._level_changed)
+        self.level.setCurrentIndex(max(0, self.level.findData(cls.level if cls else "A")))
+        self.pass_mark.setValue(cls.pass_mark if cls and cls.pass_mark is not None else self._default_pass())
+        self.form.addRow("Class name", self.name)
+        self.form.addRow("Class teacher", self.teacher)
+        self.form.addRow("Grading", self.level)
+        self.form.addRow("Pass mark", self.pass_mark)
+        self.form.addRow("", label("A-Level takes the division from the best 3 principal subjects, O-Level from the best 7. "
+                                   "A custom scale can be set up afterwards in Settings.", "muted", wrap=True))
+        self.finish()
+
+    def _default_pass(self) -> float:
+        key = self.level.currentData()
+        return PRESETS[key]["pass_mark"] if key in PRESETS else 40
+
+    def _level_changed(self):
+        self.pass_mark.setValue(self._default_pass())
+
+    def validate(self):
+        name = self.name.text().strip()
+        if not name:
+            return "Enter a class name."
+        if name.lower() in self.existing:
+            return f"A class called {name} already exists."
+        return None
+
+    def values(self) -> dict:
+        return {"name": self.name.text().strip(), "teacher": self.teacher.text().strip(),
+                "level": self.level.currentData(), "pass_mark": self.pass_mark.value()}
 
 
 class SubjectDialog(_Form):

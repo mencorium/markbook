@@ -1,23 +1,30 @@
-# /markbook_desktop/main.py
+# /markbook/main.py
 """Start Markbook: python main.py   (add --sample to load the sample class on first run)"""
 import sys
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from backend import seed
-from backend.db import create_schema
+from backend import log, migrate, seed
+from backend.services import drafts
 
 
 def main() -> int:
+    log.setup()
+    log.install_excepthook()
+    logger = log.get("app")
     app = QApplication(sys.argv)
     app.setApplicationName("Markbook")
     from frontend import theme
     theme.apply(app)
     try:
-        create_schema()
+        revision = migrate.upgrade()            # creates the schema, or brings an older one up to date
+        logger.info("started at database revision %s", revision)
     except Exception as e:  # noqa: BLE001
-        QMessageBox.critical(None, "Markbook", f"Could not connect to PostgreSQL.\n\n{e}\n\nCheck DATABASE_URL in your .env file.")
+        logger.exception("could not prepare the database")
+        QMessageBox.critical(None, "Markbook", f"Could not open the database.\n\n{e}\n\n"
+                                               f"Check DATABASE_URL in your .env file.\nDetails were written to {log.log_path()}")
         return 1
+    drafts.prune()
     if "--sample" in sys.argv:
         seed.add_sample()
     from frontend.main_window import MainWindow

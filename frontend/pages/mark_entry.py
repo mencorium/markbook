@@ -2,12 +2,12 @@
 """One assessment: enter marks (total or per question), topic & question analysis, question-paper editor."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QComboBox, QFileDialog, QPushButton, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from backend.services import assessments as A
-from backend.services import charts, exports, reports
+from backend.services import charts, drafts, exports, reports
 from backend.services.analytics import difficulty, discrimination_label
 
 from .. import theme
@@ -59,6 +59,17 @@ class MarkEntryPage(Page):
         self.t_marks = QWidget()
         mv = QVBoxLayout(self.t_marks)
         mv.setContentsMargins(0, 8, 0, 0)
+        self.draft_bar = QWidget()
+        db_row = row(label("", "note", wrap=True), None, QPushButton("Discard recovered marks"))
+        self.draft_note = db_row.itemAt(0).widget()
+        self.draft_drop = db_row.itemAt(2).widget()
+        self.draft_drop.clicked.connect(lambda _=False: self.discard_draft())
+        self.draft_bar.setLayout(db_row)
+        self.draft_bar.setVisible(False)
+        self.autosave = QTimer(self)
+        self.autosave.setSingleShot(True)
+        self.autosave.setInterval(1500)
+        self.autosave.timeout.connect(self._write_draft)
         self.sec_note = label("", "muted")
         self.grid = Table(["Student"], editable=True)
         self.grid.itemChanged.connect(self._cell_changed)
@@ -66,7 +77,7 @@ class MarkEntryPage(Page):
         save.setObjectName("primary")
         save.clicked.connect(lambda _=False: self.save_marks())
         self.c_hist = Chart(2.4)
-        mv.addWidget(panel(row(label("Marks", "h2"), None, save), self.sec_note, self.grid,
+        mv.addWidget(panel(self.draft_bar, row(label("Marks", "h2"), None, save), self.sec_note, self.grid,
                            label("Empty box = not answered (or absent if the whole row is empty); 0 = answered and scored nothing.", "muted", wrap=True)))
         mv.addWidget(panel(self.c_hist, title="Score distribution"))
         mv.addStretch(1)
@@ -122,8 +133,12 @@ class MarkEntryPage(Page):
         return self.app.gb.by_id.get(self.app.assessment_id)
 
     def can_leave(self) -> bool:
-        if self.dirty and not confirm(self, "You have unsaved marks. Leave without saving?"):
-            return False
+        if self.dirty:
+            self.autosave.stop()
+            self._write_draft()
+            if not confirm(self, "These marks are not saved to the database yet. Leave anyway?\n\n"
+                                 "They are kept as a draft and will be offered back when you open this assessment again."):
+                return False
         if self.paper_dirty and self.a and self.a.is_paper and not confirm(self, "Discard changes to the question paper?"):
             return False
         self.dirty = self.paper_dirty = False
@@ -199,6 +214,7 @@ class MarkEntryPage(Page):
         self.grid.fit(40)
         self._loading = False
         self.dirty = False
+        self._recover_draft()
 
     def _update_row(self, r: int):
         gb, a = self.app.gb, self.a
@@ -248,33 +264,102 @@ class MarkEntryPage(Page):
         self._update_row(item.row())
         self._loading = False
         self.dirty = True
+        self.autosave.start()                    # autosaved to a draft a moment after typing stops
+
+    def _collect(self) -> tuple[dict, list[str]]:
+        """Read the grid: {student_id: score} or {student_id: {question_id: score}}, plus any unreadable cells."""
+        a, rows, bad = self.a, {}, []
+        for r in range(self.grid.rowCount()):
+            name_item = self.grid.item(r, 0)
+            if name_item is None:
+                continue
+            sid = name_item.data(Qt.ItemDataRole.UserRole)
+            if a.is_paper:
+                row_ = {}
+                for c, q in enumerate(a.questions, start=1):
+                    cell = self.grid.item(r, c)
+                    v = _num(cell.text() if cell else "")
+                    if v == "bad":
+                        bad.append(f"{name_item.text()} — {q.label}")
+                    else:
+                        row_[q.id] = v
+                rows[sid] = row_
+            else:
+                cell = self.grid.item(r, 1)
+                v = _num(cell.text() if cell else "")
+                if v == "bad":
+                    bad.append(name_item.text())
+                else:
+                    rows[sid] = v
+        return rows, bad
+
+    def _write_draft(self):
+        a = self.a
+        if not a or not self.dirty:
+            return
+        values, _ = self._collect()
+        try:
+            drafts.save_draft(a.id, "paper" if a.is_paper else "total", values)
+        except OSError as e:                     # a draft is a convenience: never interrupt marking
+            self.draft_bar.setVisible(False)
+            print("could not autosave draft:", e)
+
+    def _recover_draft(self):
+        """After filling the grid from the database, put back anything typed but never saved."""
+        a = self.a
+        draft = drafts.load_draft(a.id)
+        self.draft_bar.setVisible(False)
+        if not draft or draft["kind"] != ("paper" if a.is_paper else "total"):
+            return
+        changed = 0
+        self._loading = True
+        for r in range(self.grid.rowCount()):
+            sid = self.grid.item(r, 0).data(Qt.ItemDataRole.UserRole)
+            if sid not in draft["values"]:
+                continue
+            saved = draft["values"][sid]
+            cells = [(c, saved.get(q.id)) for c, q in enumerate(a.questions, start=1)] if a.is_paper else [(1, saved)]
+            for c, v in cells:
+                text = "" if v is None else f"{float(v):g}"
+                item = self.grid.item(r, c)
+                if item is not None and item.text() != text:
+                    item.setText(text)
+                    changed += 1
+            self._update_row(r)
+        self._loading = False
+        if changed:
+            self.dirty = True
+            self.draft_note.setText(f"{changed} mark{'s' if changed != 1 else ''} you typed on {draft['saved_at']:%d %b at %H:%M} "
+                                    "were never saved. They are back in the grid below — press Save marks to keep them.")
+            self.draft_bar.setVisible(True)
+        else:
+            drafts.delete_draft(a.id)            # the draft matches what is stored: nothing to recover
+
+    @safe
+    def discard_draft(self):
+        if confirm(self, "Discard the recovered marks and show what is stored in the database?"):
+            drafts.delete_draft(self.a.id)
+            self.dirty = False
+            self.draft_bar.setVisible(False)
+            self._load_grid()
 
     @safe
     def save_marks(self):
         a = self.a
+        self.autosave.stop()
+        values, bad = self._collect()
+        if bad:
+            return error(self, "These entries are not numbers:\n\n" + "\n".join(bad[:8])
+                         + (f"\n…and {len(bad) - 8} more" if len(bad) > 8 else ""))
         if a.is_paper:
-            rows = {}
-            for r in range(self.grid.rowCount()):
-                sid = self.grid.item(r, 0).data(Qt.ItemDataRole.UserRole)
-                row_ = {}
-                for c, q in enumerate(a.questions, start=1):
-                    v = _num(self.grid.item(r, c).text() if self.grid.item(r, c) else "")
-                    if v == "bad":
-                        return error(self, f"{self.grid.item(r, 0).text()}: '{self.grid.item(r, c).text()}' is not a number.")
-                    row_[q.id] = v
-                if any(v is not None for v in row_.values()) or sid in self.app.gb.qmarks.get(a.id, {}):
-                    rows[sid] = row_
+            already = self.app.gb.qmarks.get(a.id, {})
+            rows = {sid: row_ for sid, row_ in values.items() if any(v is not None for v in row_.values()) or sid in already}
             A.save_question_marks(a.id, rows)
         else:
-            totals = {}
-            for r in range(self.grid.rowCount()):
-                sid = self.grid.item(r, 0).data(Qt.ItemDataRole.UserRole)
-                v = _num(self.grid.item(r, 1).text() if self.grid.item(r, 1) else "")
-                if v == "bad":
-                    return error(self, f"{self.grid.item(r, 0).text()}: score is not a number.")
-                totals[sid] = v
-            A.save_totals(a.id, totals)
+            A.save_totals(a.id, values)
         self.dirty = False
+        drafts.delete_draft(a.id)                # saved for real: the draft is no longer needed
+        self.draft_bar.setVisible(False)
         self.app.reload()
         info(self, "Marks saved.")
 

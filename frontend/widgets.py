@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-import traceback
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -12,6 +11,8 @@ from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QScrollArea,
                              QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+from backend.log import get as get_logger
+from backend.services.backup import BackupError
 from backend.services.imports import ImportError_
 from backend.services.records import ValidationError
 
@@ -240,16 +241,18 @@ def confirm(parent, text: str) -> bool:
 
 
 def safe(fn):
-    """Show validation problems as a message instead of crashing; log anything unexpected."""
+    """Show expected problems as a message; log anything unexpected and tell the user where the log is."""
     @functools.wraps(fn)
     def wrapper(self, *a, **k):
         try:
             return fn(self, *a, **k)
-        except (ValidationError, ImportError_) as e:
+        except (ValidationError, ImportError_, BackupError) as e:
+            get_logger("ui").info("%s refused: %s", fn.__qualname__, e)
             error(self, str(e))
         except Exception as e:  # noqa: BLE001
-            traceback.print_exc()
-            error(self, f"Something went wrong: {e}")
+            from backend.log import log_path
+            get_logger("ui").exception("unexpected error in %s", fn.__qualname__)
+            error(self, f"Something went wrong: {e}\n\nDetails were written to {log_path()}")
     return wrapper
 
 

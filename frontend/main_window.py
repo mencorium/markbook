@@ -5,7 +5,14 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
+import datetime as dt
+
+from PyQt6.QtGui import QGuiApplication
+
 from backend.config import get_config
+from backend.log import get as get_logger
+from backend.services import backup as BK
+from backend.services import records as R
 from backend.services.analytics import Gradebook
 
 from .pages.assessments import AssessmentsPage
@@ -116,6 +123,26 @@ class MainWindow(QMainWindow):
         """Re-read the database after a change and redraw the current page."""
         self.gb = Gradebook.load()
         self.pages[self.current].refresh()
+
+    def closeEvent(self, event):
+        """Back up once a day on the way out, unless it is switched off in Settings."""
+        if not self._leave_ok():
+            event.ignore()
+            return
+        s = self.gb.settings
+        today = dt.date.today().isoformat()
+        if s.get("auto_backup", True) and s.get("last_backup", "")[:10] != today and BK.tools_available() and self.gb.students:
+            try:
+                QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                path = BK.backup(s.get("backup_dir") or None, "onclose")
+                BK.prune(20, s.get("backup_dir") or None)
+                R.save_settings({"last_backup": dt.datetime.now().isoformat(timespec="seconds")})
+                get_logger("app").info("automatic backup on close: %s", path)
+            except Exception:  # noqa: BLE001 - never block closing over a backup
+                get_logger("app").exception("automatic backup failed")
+            finally:
+                QGuiApplication.restoreOverrideCursor()
+        event.accept()
 
     def class_items(self) -> list[tuple[str, int]]:
         return [(c.name, c.id) for c in sorted(self.gb.classes.values(), key=lambda c: c.name.lower())]

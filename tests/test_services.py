@@ -105,3 +105,13 @@ def test_delete_subjects_takes_their_assessments_with_them():
     assert keep.id in gb.subjects and len(gb.assessments_for(subject_id=keep.id)) == 1
     assert not any(a.subject_id in {d.id for d in doomed} for a in gb.assessments)   # marks went with them
     assert R.delete_subjects([doomed[0].id]) == (0, 0)                               # deleting again is harmless
+
+
+def test_create_class_with_its_own_grading():
+    cls = R.get_or_create_class("Form Two North")
+    R.save_class(cls.id, name="Form Two North", level="O", pass_mark=30, teacher="Mr. J. Mwaipopo")
+    gb = Gradebook.load()
+    saved = gb.classes[cls.id]
+    assert (saved.name, saved.level, saved.teacher) == ("Form Two North", "O", "Mr. J. Mwaipopo")
+    assert gb.scale(cls.id).best == 7                       # O-Level: division from the best 7 subjects
+    assert R.get_or_create_class("form two north").id == cls.id      # same class, not a duplicate
