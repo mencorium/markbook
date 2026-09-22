@@ -46,19 +46,26 @@ def test_every_page_opens(monkeypatch):
     before = table.rowCount()
     assert not students.b_del.isEnabled()                       # nothing selected yet
     table.selectRow(0)
-    assert students.b_del.isEnabled() and students.b_del.text() == "Delete"
-    students.delete_selected()
+    assert students.b_del.isEnabled() and students.b_del.text() == "Archive"
+    students.remove_selected()                                  # archives: the row leaves the class list
     assert table.rowCount() == before - 1
 
     sel = table.selectionModel()
     for r in (0, 1, 2):
         sel.select(table.model().index(r, 0), sel.SelectionFlag.Select | sel.SelectionFlag.Rows)
-    assert students.b_del.text() == "Delete 3 students"
+    assert students.b_del.text() == "Archive (3)"
     gone = set(table.selected_ids())
-    students.delete_selected()
+    students.remove_selected()
     assert table.rowCount() == before - 4
-    assert not gone & set(w.gb.students)
-    assert not any(sid in gone for marks in w.gb.totals.values() for sid in marks)
+    assert not gone & set(w.gb.students)                        # out of the results
+    assert any(sid in marks for marks in w.gb.totals.values() for sid in gone)   # marks kept
+
+    students.show_archived.setChecked(True)                     # and they can come back
+    assert table.rowCount() == 4
+    table.selectAll()
+    students.restore_selected()
+    students.show_archived.setChecked(False)
+    assert table.rowCount() == before
 
     # delete subjects the same way, taking their assessments with them
     w.show_page("subjects")
@@ -68,12 +75,12 @@ def test_every_page_opens(monkeypatch):
     sel = stable.selectionModel()
     for r in (0, 1):
         sel.select(stable.model().index(r, 0), sel.SelectionFlag.Select | sel.SelectionFlag.Rows)
-    assert subjects.b_del.text() == "Delete 2 subjects"
+    assert subjects.b_del.text() == "Archive (2)"
     dropped = set(stable.selected_ids())
     rows, assessments = stable.rowCount(), len(w.gb.assessments)
-    subjects.delete_selected()
+    subjects.remove_selected()
     assert stable.rowCount() == rows - 2
     assert not dropped & set(w.gb.subjects)
-    assert len(w.gb.assessments) < assessments
+    assert len(w.gb.assessments) < assessments                  # their assessments are hidden too
 
     seed.remove_sample()

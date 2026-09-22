@@ -20,7 +20,7 @@ class StudentDetailPage(Page):
         back.clicked.connect(lambda _=False: app.show_page("students"))
         self.body.insertLayout(0, row(back, stretch_end=True))
         for text, fn, name in [("Edit details", self.edit, None), ("Report card (PDF)", self.report, None),
-                               ("Progress (Excel)", self.progress_xlsx, None), ("Remove", self.remove, "danger")]:
+                               ("Progress (Excel)", self.progress_xlsx, None), ("Archive", self.archive, "danger")]:
             b = QPushButton(text)
             if name:
                 b.setObjectName(name)
@@ -155,9 +155,10 @@ class StudentDetailPage(Page):
             self.app.reload()
 
     @safe
-    def remove(self):
-        if confirm(self, f"Remove {self.stu.name}? Their marks will be deleted too."):
-            R.delete_student(self.stu.id)
+    def archive(self):
+        if confirm(self, f"Archive {self.stu.name}?\n\nThey leave the class list, results and exports, but their marks and "
+                         "attendance are kept. Restore them any time from Students → Show archived."):
+            R.archive_students([self.stu.id])
             self.app.gb = self.app.gb.load()
             self.app.show_page("students")
 

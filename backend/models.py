@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -44,6 +44,7 @@ class Subject(Base):
     code: Mapped[str] = mapped_column(String(10), default="")
     subsidiary: Mapped[bool] = mapped_column(Boolean, default=False)       # not counted in A-Level division
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)   # hidden, not deleted
 
 
 class Student(Base):
@@ -56,6 +57,7 @@ class Student(Base):
     remarks: Mapped[str] = mapped_column(Text, default="")
     targets: Mapped[Any] = mapped_column(JSONType, default=dict)           # {subject_id: grade}
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)   # left the class, records kept
 
     class_group: Mapped[ClassGroup] = relationship(back_populates="students")
 

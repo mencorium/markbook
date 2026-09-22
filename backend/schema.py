@@ -23,6 +23,7 @@ class SubjectInfo:
     name: str
     code: str = ""
     subsidiary: bool = False
+    archived_at: dt.datetime | None = None
 
     @property
     def short(self) -> str:
@@ -38,6 +39,7 @@ class StudentInfo:
     phone: str | None = None
     remarks: str = ""
     targets: dict = field(default_factory=dict)      # {subject_id(str): grade}
+    archived_at: dt.datetime | None = None
 
 
 @dataclass

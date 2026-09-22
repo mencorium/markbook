@@ -112,12 +112,16 @@ def add_sample(seed: int | None = None) -> None:
 
 
 def remove_sample() -> None:
+    """Sample rows are flagged, so they go even if a sample student was moved to another class."""
     with session_scope() as s:
         cls = s.scalar(select(ClassGroup).where(ClassGroup.name == SAMPLE_CLASS))
         if cls:
             s.execute(delete(Assessment).where(Assessment.class_id == cls.id))
             s.execute(delete(AttendanceDay).where(AttendanceDay.class_id == cls.id))
-            s.execute(delete(Student).where(Student.class_id == cls.id))
+        s.execute(delete(Assessment).where(Assessment.is_sample.is_(True)))
+        s.execute(delete(Student).where(Student.is_sample.is_(True)))
+        s.flush()
+        if cls:
             s.delete(cls)
         s.flush()
         for sub in s.scalars(select(Subject).where(Subject.is_sample.is_(True))):

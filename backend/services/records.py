@@ -2,12 +2,14 @@
 """Settings, classes, subjects and students."""
 from __future__ import annotations
 
+import datetime as dt
+
 from sqlalchemy import func, select
 
 from ..db import session_scope
 from ..models import Assessment, ClassGroup, Setting, Student, Subject
 from ..phone import normalize_phone
-from ..schema import ClassInfo, SubjectInfo, StudentInfo
+from ..schema import ClassInfo, StudentInfo, SubjectInfo
 
 
 class ValidationError(ValueError):
@@ -79,14 +81,42 @@ def save_class(class_id: int, *, name: str, level: str, pass_mark: float | None,
 def delete_class(class_id: int) -> None:
     with session_scope() as s:
         if s.scalar(select(func.count()).select_from(Student).where(Student.class_id == class_id)):
-            raise ValidationError("Move or remove the students in this class first.")
+            raise ValidationError("Move, archive or remove the students in this class first "
+                                  "(archived students still belong to their class).")
         s.delete(s.get(ClassGroup, class_id))
 
 
 # ---------------- subjects ----------------
-def list_subjects() -> list[SubjectInfo]:
+def list_subjects(archived: bool = False) -> list[SubjectInfo]:
     with session_scope() as s:
-        return [SubjectInfo(x.id, x.name, x.code, x.subsidiary) for x in s.scalars(select(Subject).order_by(Subject.name))]
+        q = select(Subject).where(Subject.archived_at.is_not(None) if archived else Subject.archived_at.is_(None)).order_by(Subject.name)
+        return [SubjectInfo(x.id, x.name, x.code, x.subsidiary, x.archived_at) for x in s.scalars(q)]
+
+
+def archive_subjects(subject_ids: list[int]) -> tuple[int, int]:
+    """Hide subjects and their assessments from results and exports, without deleting any marks.
+    Returns (subjects archived, assessments hidden)."""
+    now = dt.datetime.now()
+    with session_scope() as s:
+        subjects = assessments = 0
+        for sid in subject_ids:
+            x = s.get(Subject, sid)
+            if x and x.archived_at is None:
+                x.archived_at = now
+                assessments += s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == sid)) or 0
+                subjects += 1
+        return subjects, assessments
+
+
+def restore_subjects(subject_ids: list[int]) -> int:
+    with session_scope() as s:
+        n = 0
+        for sid in subject_ids:
+            x = s.get(Subject, sid)
+            if x and x.archived_at is not None:
+                x.archived_at = None
+                n += 1
+        return n
 
 
 def save_subject(subject_id: int | None, *, name: str, code: str = "", subsidiary: bool = False) -> SubjectInfo:
@@ -101,7 +131,7 @@ def save_subject(subject_id: int | None, *, name: str, code: str = "", subsidiar
         x.name, x.code, x.subsidiary = name, code.strip().upper()[:10], subsidiary
         s.add(x)
         s.flush()
-        return SubjectInfo(x.id, x.name, x.code, x.subsidiary)
+        return SubjectInfo(x.id, x.name, x.code, x.subsidiary, x.archived_at)
 
 
 def delete_subject(subject_id: int) -> int:
@@ -126,15 +156,40 @@ def delete_subjects(subject_ids: list[int]) -> tuple[int, int]:
 
 # ---------------- students ----------------
 def _student_info(x: Student) -> StudentInfo:
-    return StudentInfo(x.id, x.name, x.class_id, x.reg_no, x.phone, x.remarks or "", dict(x.targets or {}))
+    return StudentInfo(x.id, x.name, x.class_id, x.reg_no, x.phone, x.remarks or "", dict(x.targets or {}), x.archived_at)
 
 
-def list_students(class_id: int | None = None) -> list[StudentInfo]:
+def list_students(class_id: int | None = None, archived: bool = False) -> list[StudentInfo]:
     with session_scope() as s:
-        q = select(Student).order_by(Student.name)
+        q = select(Student).where(Student.archived_at.is_not(None) if archived else Student.archived_at.is_(None))
+        q = q.order_by(Student.archived_at.desc(), Student.name) if archived else q.order_by(Student.name)
         if class_id:
             q = q.where(Student.class_id == class_id)
         return [_student_info(x) for x in s.scalars(q)]
+
+
+def archive_students(student_ids: list[int]) -> int:
+    """Hide students from class lists, results and exports. Their marks and attendance stay."""
+    now = dt.datetime.now()
+    with session_scope() as s:
+        n = 0
+        for sid in student_ids:
+            x = s.get(Student, sid)
+            if x and x.archived_at is None:
+                x.archived_at = now
+                n += 1
+        return n
+
+
+def restore_students(student_ids: list[int]) -> int:
+    with session_scope() as s:
+        n = 0
+        for sid in student_ids:
+            x = s.get(Student, sid)
+            if x and x.archived_at is not None:
+                x.archived_at = None
+                n += 1
+        return n
 
 
 def get_student(student_id: int) -> StudentInfo | None:

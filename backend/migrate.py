@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from alembic import command
+from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -21,6 +22,7 @@ from sqlalchemy.exc import OperationalError
 
 from .db import engine
 from .log import get
+from .models import Base
 
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE = "0001_initial"
@@ -39,6 +41,16 @@ def _config() -> Config:
     cfg = Config(str(ini) if ini.exists() else None)
     cfg.set_main_option("script_location", str(scripts))
     return cfg
+
+
+def _stamp_target(connection) -> str:
+    """Which revision an untracked schema really matches: the newest one if it already looks
+    like the current models, otherwise the baseline so the migrations can bring it forward."""
+    differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    if not differences:
+        return "head"
+    log.info("untracked schema differs from the current models in %d place(s): starting from the baseline", len(differences))
+    return BASELINE
 
 
 def _guard(connection) -> None:
@@ -70,11 +82,12 @@ def upgrade() -> str | None:
 
     try:
         if legacy:
-            log.info("existing database without a migration history: stamping %s", BASELINE)
             with engine().begin() as connection:          # committed on its own, before any migration runs
                 _guard(connection)
+                target = _stamp_target(connection)
+                log.info("existing database without a migration history: stamping %s", target)
                 cfg.attributes["connection"] = connection
-                command.stamp(cfg, BASELINE)
+                command.stamp(cfg, target)
             at = current_revision()
             log.info("stamped at %s", at)
 

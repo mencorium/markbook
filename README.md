@@ -1,4 +1,4 @@
-<!-- /markbook_desktop/README.md -->
+<!-- /markbook/README.md -->
 # Markbook Desktop
 
 Student progress analysis for teachers and tutors: PyQt6 desktop app with a PostgreSQL database.
@@ -56,6 +56,12 @@ the `bin` folder of your PostgreSQL installation, e.g. `C:\Program Files\Postgre
 typing. If the app closes, the laptop dies or the power goes out, the next time you open that
 assessment the marks are back in the grid with a notice; press Save marks to keep them, or
 discard them. The draft is deleted once the marks reach the database.
+
+**Archive instead of delete.** Removing a student or subject archives it: it leaves class lists,
+results, report cards and exports, but every mark and attendance record is kept. Tick **Show
+archived** on the Students or Subjects page to see what is archived, restore it, or delete it for
+good. Archiving a subject hides its assessments too. Deleting for good is the only irreversible
+action in the app.
 
 **Logs.** Problems are written to a rotating log (`logs/markbook.log` in the app folder, path
 shown in Settings). Send that file along when reporting a bug.

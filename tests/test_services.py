@@ -75,6 +75,46 @@ def test_attendance_and_remove_sample():
     assert not any(c.name == seed.SAMPLE_CLASS for c in R.list_classes())
 
 
+def test_archived_students_leave_results_but_keep_their_marks():
+    seed.add_sample(seed=4)
+    gb = Gradebook.load()
+    cls = next(c for c in gb.classes.values() if c.name == seed.SAMPLE_CLASS)
+    ids = [s.id for s in gb.students_in(cls.id)][:3]
+    before_rank, before_marks = len(gb.ranking(cls.id)), sum(len(m) for m in gb.totals.values())
+
+    assert R.archive_students(ids) == 3
+    gb = Gradebook.load()
+    assert len(gb.ranking(cls.id)) == before_rank - 3
+    assert all(i not in gb.students for i in ids)
+    assert sum(len(m) for m in gb.totals.values()) == before_marks        # nothing was deleted
+    archived = R.list_students(archived=True)
+    assert {s.id for s in archived} == set(ids) and all(s.archived_at for s in archived)
+    assert R.archive_students(ids) == 0                                   # archiving twice changes nothing
+
+    assert R.restore_students(ids) == 3
+    gb = Gradebook.load()
+    assert len(gb.ranking(cls.id)) == before_rank
+    assert abs(sum(gb.summary(gb.students[i]).overall for i in ids)) > 0   # their results are back
+
+
+def test_archived_subject_hides_its_assessments_only():
+    gb = Gradebook.load()
+    cls = next(c for c in gb.classes.values() if c.name == seed.SAMPLE_CLASS)
+    subj = gb.class_subjects(cls.id)[0]
+    others = len(gb.assessments_for(cls.id)) - len(gb.assessments_for(cls.id, subj.id))
+
+    archived, hidden = R.archive_subjects([subj.id])
+    assert (archived, hidden) == (1, 4)
+    gb = Gradebook.load()
+    assert subj.id not in gb.subjects and len(gb.assessments_for(cls.id)) == others
+    assert not any(subj.id in gb.summary(s).subs for s in gb.students_in(cls.id))
+
+    assert R.restore_subjects([subj.id]) == 1
+    gb = Gradebook.load()
+    assert subj.id in gb.subjects and len(gb.assessments_for(cls.id, subj.id)) == 4
+    seed.remove_sample()
+
+
 def test_delete_students_takes_their_marks_with_them():
     subj = R.save_subject(None, name="Deletion Test Subject", code="DEL")
     a, b = [R.save_student(None, name=n, class_name="Delete Test") for n in ("Temp One", "Temp Two")]

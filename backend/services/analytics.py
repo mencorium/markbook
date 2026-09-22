@@ -13,8 +13,8 @@ from ..db import session_scope
 from ..grading import Division, Scale, make_scale
 from ..models import Assessment, AttendanceDay, ClassGroup, Mark, Question, QuestionMark, Student, Subject
 from ..paper import Q, Sec, paper_total
+from ..schema import AssessmentInfo, AttendanceDayInfo, ClassInfo, QuestionInfo, SectionInfo, StudentInfo, SubjectInfo
 from .records import get_settings
-from ..schema import ClassInfo, SubjectInfo, StudentInfo, AssessmentInfo, AttendanceDayInfo, SectionInfo, QuestionInfo
 
 
 def avg(xs) -> float | None:
@@ -161,12 +161,14 @@ class Gradebook:
     def load(cls) -> "Gradebook":
         with session_scope() as s:
             classes = {c.id: ClassInfo(c.id, c.name, c.level, c.pass_mark, c.teacher or "", c.scale) for c in s.scalars(select(ClassGroup))}
-            subjects = {x.id: SubjectInfo(x.id, x.name, x.code, x.subsidiary) for x in s.scalars(select(Subject))}
-            students = {x.id: StudentInfo(x.id, x.name, x.class_id, x.reg_no, x.phone, x.remarks or "", dict(x.targets or {})) for x in s.scalars(select(Student))}
+            # archived students and subjects stay in the database but take no part in any calculation
+            subjects = {x.id: SubjectInfo(x.id, x.name, x.code, x.subsidiary) for x in s.scalars(select(Subject).where(Subject.archived_at.is_(None)))}
+            students = {x.id: StudentInfo(x.id, x.name, x.class_id, x.reg_no, x.phone, x.remarks or "", dict(x.targets or {}))
+                        for x in s.scalars(select(Student).where(Student.archived_at.is_(None)))}
             assessments = [AssessmentInfo(a.id, a.subject_id, a.class_id, a.type, a.name, a.date, float(a.max_marks), list(a.topics or []),
                                           [SectionInfo(x.id, x.name, x.pick) for x in a.sections],
                                           [QuestionInfo(q.id, q.label, q.topic, float(q.max_marks), q.section_id) for q in a.questions])
-                           for a in s.scalars(select(Assessment))]
+                           for a in s.scalars(select(Assessment)) if a.subject_id in subjects]   # archived subjects drop out here
             totals: dict[int, dict[int, float]] = {}
             for m in s.scalars(select(Mark)):
                 totals.setdefault(m.assessment_id, {})[m.student_id] = float(m.score)
