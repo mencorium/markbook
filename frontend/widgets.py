@@ -23,10 +23,14 @@ def label(text: str = "", name: str | None = None, wrap: bool = False) -> QLabel
     if name:
         w.setObjectName(name)
     w.setWordWrap(wrap)
+    if not wrap:
+        # keep a one-line label at its natural height: otherwise spare space in a
+        # column is handed to the label and it pushes the widgets below it down
+        w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     return w
 
 
-def panel(*widgets, title: str | None = None, layout: str = "v") -> QFrame:
+def panel(*widgets, title: str | None = None, layout: str = "v", stretch_end: bool = False) -> QFrame:
     f = QFrame()
     f.setObjectName("panel")
     lay = QVBoxLayout(f) if layout == "v" else QHBoxLayout(f)
@@ -36,6 +40,8 @@ def panel(*widgets, title: str | None = None, layout: str = "v") -> QFrame:
         lay.addWidget(label(title, "h2"))
     for w in widgets:
         lay.addWidget(w) if isinstance(w, QWidget) else lay.addLayout(w)
+    if stretch_end:                 # spare height collects at the bottom, not around the contents
+        lay.addStretch(1)
     return f
 
 
@@ -74,8 +80,7 @@ class Page(QWidget):
         self.subtitle = label(subtitle, "subtitle", wrap=True)
         titles.addWidget(self.title)
         titles.addWidget(self.subtitle)
-        head.addLayout(titles)
-        head.addStretch(1)
+        head.addLayout(titles, 1)      # the title column takes the spare width, so subtitles wrap late
         self.actions = QHBoxLayout()
         self.body.addLayout(head)
         if actions_below:                 # many buttons: give them their own row so the page never scrolls sideways

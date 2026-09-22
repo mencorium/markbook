@@ -25,6 +25,8 @@ QMainWindow, #page {{ background: {PAPER}; }}
 #h2 {{ font-size: 12pt; font-weight: 700; }}
 #muted {{ color: {MUTED}; }}
 #note {{ background: {GRID}; border-left: 3px solid {AMBER}; padding: 8px 10px; border-radius: 4px; }}
+#notice {{ background: #E8F0FA; border-left: 3px solid {BLUE}; padding: 7px 10px; border-radius: 4px; }}
+#noticeDone {{ background: #E4F1EA; border-left: 3px solid {GREEN}; padding: 7px 10px; border-radius: 4px; }}
 #panel {{ background: {SURFACE}; border: 1px solid {RULE}; border-radius: 10px; }}
 #stat {{ background: {SURFACE}; border: 1px solid {RULE}; border-radius: 10px; }}
 #statValue {{ font-size: 16pt; font-weight: 700; }}

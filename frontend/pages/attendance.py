@@ -31,18 +31,18 @@ class AttendancePage(Page):
         allp.clicked.connect(lambda _=False: self.all_present())
         save.clicked.connect(lambda _=False: self.save())
         delete.clicked.connect(lambda _=False: self.delete())
-        self.status = label("", "muted")
+        self.status = label("", "notice", wrap=True)
         self.register = Table(["Student", "Present"], stretch=0)
         self.register.itemChanged.connect(self._changed)
         g = QGridLayout()
         g.setSpacing(14)
-        g.addWidget(panel(row(label("Date"), self.date, None, allp, save), self.status, self.register, row(delete, None)), 0, 0, 2, 1)
+        g.addWidget(panel(self.status, row(label("Date"), self.date, None, allp, save), self.register, row(delete, None), stretch_end=True), 0, 0, 2, 1)
         self.lowest = Table(["Student", "Attendance"], stretch=0)
         self.lowest.doubleClicked.connect(lambda: app.open_student(self.lowest.current_id()))
         self.days = Table(["Date", "Present"], stretch=0)
         self.days.doubleClicked.connect(self._open_day)
-        g.addWidget(panel(self.lowest, title="Lowest attendance"), 0, 1)
-        g.addWidget(panel(self.days, title="Recorded days (double-click to open)"), 1, 1)
+        g.addWidget(panel(self.lowest, title="Lowest attendance", stretch_end=True), 0, 1)
+        g.addWidget(panel(self.days, title="Recorded days (double-click to open)", stretch_end=True), 1, 1)
         g.setColumnStretch(0, 3)
         g.setColumnStretch(1, 2)
         w = QWidget()
@@ -105,9 +105,13 @@ class AttendancePage(Page):
         self.days.set_rows([[d.date.isoformat(), f"{len(d.roster) - len(d.absent)}/{len(d.roster)}"] for d in days], [d.date for d in days], fit_height=True)
 
     def _status(self, exists: bool):
-        present = sum(1 for r in range(self.register.rowCount()) if self.register.item(r, 1).checkState() == Qt.CheckState.Checked)
-        self.status.setText(("Already recorded for this day — saving updates it. " if exists else "Not recorded yet for this day. ")
-                            + f"{present} of {self.register.rowCount()} present.")
+        total = self.register.rowCount()
+        present = sum(1 for r in range(total) if self.register.item(r, 1).checkState() == Qt.CheckState.Checked)
+        day = f"{self._day():%A %d %b %Y}"
+        self.status.setObjectName("noticeDone" if exists else "notice")
+        self.status.setStyleSheet("")               # re-apply the stylesheet for the new object name
+        self.status.setText(f"{day} — " + ("already recorded; saving updates it. " if exists else "not recorded yet. ")
+                            + f"{present} of {total} present, {total - present} absent.")
 
     def _changed(self, item):
         if self._loading or item.column() != 1:
