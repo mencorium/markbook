@@ -19,10 +19,18 @@ def main() -> int:
     try:
         revision = migrate.upgrade()            # creates the schema, or brings an older one up to date
         logger.info("started at database revision %s", revision)
+    except migrate.MigrationError as e:         # already written for the person reading it
+        logger.error("could not prepare the database: %s", e)
+        QMessageBox.critical(None, "Markbook", f"{e}\n\nDetails were written to {log.log_path()}")
+        return 1
+    except KeyboardInterrupt:
+        logger.warning("startup interrupted before the database was ready")
+        return 1
     except Exception as e:  # noqa: BLE001
         logger.exception("could not prepare the database")
         QMessageBox.critical(None, "Markbook", f"Could not open the database.\n\n{e}\n\n"
-                                               f"Check DATABASE_URL in your .env file.\nDetails were written to {log.log_path()}")
+                                               f"Check that PostgreSQL is running and DATABASE_URL in your .env file is correct.\n"
+                                               f"Details were written to {log.log_path()}")
         return 1
     drafts.prune()
     if "--sample" in sys.argv:

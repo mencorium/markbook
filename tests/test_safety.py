@@ -1,4 +1,4 @@
-# /markbook_desktop/tests/test_safety.py
+# /markbook/tests/test_safety.py
 """Migrations, backups and autosaved drafts — the features that protect a term's marks."""
 import datetime as dt
 
@@ -31,6 +31,23 @@ def test_database_made_before_migrations_is_stamped_not_rebuilt():
     assert migrate.upgrade() == migrate.head_revision()
     assert not migrate.pending()
     assert Gradebook.load().students[stu.id].name == "Legacy Student"      # data survived
+
+
+def test_migration_blocked_by_another_connection_fails_fast(monkeypatch):
+    """A lock held elsewhere must produce a message, not a startup that hangs for ever."""
+    from sqlalchemy import text
+    monkeypatch.setattr(migrate, "LOCK_TIMEOUT", "1s")
+    with db.engine().begin() as c:
+        c.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+    blocker = db.engine().connect()
+    try:
+        blocker.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(32) primary key)"))
+        blocker.execute(text("LOCK TABLE alembic_version IN ACCESS EXCLUSIVE MODE"))
+        with pytest.raises(migrate.MigrationError, match="in use by another program"):
+            migrate.upgrade()
+    finally:
+        blocker.close()
+    assert migrate.upgrade() == migrate.head_revision()      # fine again once the other program lets go
 
 
 @pytest.mark.skipif(not BK.tools_available(), reason="pg_dump/pg_restore are not installed")
