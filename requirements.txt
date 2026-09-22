@@ -1,0 +1,9 @@
+# /markbook_desktop/requirements.txt
+PyQt6>=6.6
+SQLAlchemy>=2.0
+psycopg[binary]>=3.1
+python-dotenv>=1.0
+openpyxl>=3.1
+reportlab>=4.0
+matplotlib>=3.8
+pytest>=8.0

@@ -1,0 +1,186 @@
+# /markbook/backend/services/records.py
+"""Settings, classes, subjects and students."""
+from __future__ import annotations
+
+from sqlalchemy import func, select
+
+from ..db import session_scope
+from ..models import Assessment, ClassGroup, Setting, Student, Subject
+from ..phone import normalize_phone
+from ..schema import ClassInfo, SubjectInfo, StudentInfo
+
+
+class ValidationError(ValueError):
+    """Raised with a message that can be shown to the user as-is."""
+
+
+# ---------------- settings ----------------
+DEFAULT_SETTINGS = {"school": "", "term": "", "ca_weight": 40, "head_teacher": "", "next_term": ""}
+
+
+def get_settings() -> dict:
+    with session_scope() as s:
+        rows = {r.key: r.value for r in s.scalars(select(Setting))}
+    return {**DEFAULT_SETTINGS, **rows}
+
+
+def save_settings(values: dict) -> None:
+    with session_scope() as s:
+        for k, v in values.items():
+            if k not in DEFAULT_SETTINGS:
+                continue
+            row = s.get(Setting, k)
+            if row:
+                row.value = v
+            else:
+                s.add(Setting(key=k, value=v))
+
+
+# ---------------- classes ----------------
+def _class_info(c: ClassGroup) -> ClassInfo:
+    return ClassInfo(c.id, c.name, c.level, c.pass_mark, c.teacher or "", c.scale)
+
+
+def list_classes() -> list[ClassInfo]:
+    with session_scope() as s:
+        return [_class_info(c) for c in s.scalars(select(ClassGroup).order_by(ClassGroup.name))]
+
+
+def get_or_create_class(name: str) -> ClassInfo:
+    name = name.strip()
+    if not name:
+        raise ValidationError("Enter a class name.")
+    with session_scope() as s:
+        c = s.scalar(select(ClassGroup).where(func.lower(ClassGroup.name) == name.lower()))
+        if not c:
+            c = ClassGroup(name=name, level="A")
+            s.add(c)
+            s.flush()
+        return _class_info(c)
+
+
+def save_class(class_id: int, *, name: str, level: str, pass_mark: float | None, teacher: str, scale: list | None = None) -> ClassInfo:
+    name = name.strip()
+    if not name:
+        raise ValidationError("Enter a class name.")
+    if level not in ("A", "O", "custom"):
+        raise ValidationError("Choose a grading level.")
+    with session_scope() as s:
+        clash = s.scalar(select(ClassGroup).where(func.lower(ClassGroup.name) == name.lower(), ClassGroup.id != class_id))
+        if clash:
+            raise ValidationError(f"A class called {name} already exists.")
+        c = s.get(ClassGroup, class_id)
+        c.name, c.level, c.pass_mark, c.teacher = name, level, pass_mark, teacher.strip()
+        c.scale = scale if level == "custom" else None
+        return _class_info(c)
+
+
+def delete_class(class_id: int) -> None:
+    with session_scope() as s:
+        if s.scalar(select(func.count()).select_from(Student).where(Student.class_id == class_id)):
+            raise ValidationError("Move or remove the students in this class first.")
+        s.delete(s.get(ClassGroup, class_id))
+
+
+# ---------------- subjects ----------------
+def list_subjects() -> list[SubjectInfo]:
+    with session_scope() as s:
+        return [SubjectInfo(x.id, x.name, x.code, x.subsidiary) for x in s.scalars(select(Subject).order_by(Subject.name))]
+
+
+def save_subject(subject_id: int | None, *, name: str, code: str = "", subsidiary: bool = False) -> SubjectInfo:
+    name = name.strip()
+    if not name:
+        raise ValidationError("Enter a subject name.")
+    with session_scope() as s:
+        clash = s.scalar(select(Subject).where(func.lower(Subject.name) == name.lower(), Subject.id != (subject_id or 0)))
+        if clash:
+            raise ValidationError(f"{name} already exists.")
+        x = s.get(Subject, subject_id) if subject_id else Subject()
+        x.name, x.code, x.subsidiary = name, code.strip().upper()[:10], subsidiary
+        s.add(x)
+        s.flush()
+        return SubjectInfo(x.id, x.name, x.code, x.subsidiary)
+
+
+def delete_subject(subject_id: int) -> int:
+    """Deletes the subject and (by cascade) its assessments and marks. Returns the number of assessments removed."""
+    with session_scope() as s:
+        n = s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == subject_id)) or 0
+        s.delete(s.get(Subject, subject_id))
+        return n
+
+
+# ---------------- students ----------------
+def _student_info(x: Student) -> StudentInfo:
+    return StudentInfo(x.id, x.name, x.class_id, x.reg_no, x.phone, x.remarks or "", dict(x.targets or {}))
+
+
+def list_students(class_id: int | None = None) -> list[StudentInfo]:
+    with session_scope() as s:
+        q = select(Student).order_by(Student.name)
+        if class_id:
+            q = q.where(Student.class_id == class_id)
+        return [_student_info(x) for x in s.scalars(q)]
+
+
+def get_student(student_id: int) -> StudentInfo | None:
+    with session_scope() as s:
+        x = s.get(Student, student_id)
+        return _student_info(x) if x else None
+
+
+def save_student(student_id: int | None, *, name: str, class_name: str, reg_no: str | None = None, phone: str | None = None) -> StudentInfo:
+    """Create or update. Moving a student to another class keeps all their marks and attendance."""
+    name = " ".join(name.split())
+    if not name:
+        raise ValidationError("Enter the student's name.")
+    try:
+        phone_e164 = normalize_phone(phone)
+    except ValueError as e:
+        raise ValidationError(str(e)) from e
+    reg = (reg_no or "").strip() or None
+    if reg and reg.lower() == "null":
+        reg = None
+    cls = get_or_create_class(class_name)
+    with session_scope() as s:
+        if reg and s.scalar(select(Student).where(func.lower(Student.reg_no) == reg.lower(), Student.id != (student_id or 0))):
+            raise ValidationError(f"Reg. number {reg} already belongs to another student.")
+        x = s.get(Student, student_id) if student_id else Student(targets={}, remarks="")
+        x.name, x.reg_no, x.phone, x.class_id = name, reg, phone_e164, cls.id
+        s.add(x)
+        s.flush()
+        return _student_info(x)
+
+
+def set_remarks(student_id: int, remarks: str) -> None:
+    with session_scope() as s:
+        s.get(Student, student_id).remarks = remarks.strip()
+
+
+def set_target(student_id: int, subject_id: int, grade: str | None) -> None:
+    with session_scope() as s:
+        x = s.get(Student, student_id)
+        t = dict(x.targets or {})
+        if grade:
+            t[str(subject_id)] = grade
+        else:
+            t.pop(str(subject_id), None)
+        x.targets = t
+
+
+def delete_student(student_id: int) -> None:
+    with session_scope() as s:
+        s.delete(s.get(Student, student_id))
+
+
+def bulk_add_students(lines: str, class_name: str) -> int:
+    """One student per line: 'Name, RegNo, Phone' (reg and phone optional)."""
+    n = 0
+    for line in lines.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if parts and parts[0]:
+            save_student(None, name=parts[0], class_name=class_name,
+                         reg_no=parts[1] if len(parts) > 1 else None, phone=parts[2] if len(parts) > 2 else None)
+            n += 1
+    return n
