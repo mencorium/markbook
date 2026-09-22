@@ -1,4 +1,4 @@
-# /markbook_desktop/backend/services/charts.py
+# /markbook/backend/services/charts.py
 """Chart drawing shared by the desktop screens and the PDF reports (matplotlib Axes in, nothing out)."""
 from __future__ import annotations
 
@@ -48,8 +48,9 @@ def progress(ax, gb: Gradebook, student_id: int, subject_id: int | None = None, 
             ax2.set_ylim(0, 100)
             ax2.tick_params(colors=MUTED, labelsize=7)
             ax2.yaxis.set_major_formatter(lambda v, _: f"{v:.0f}%")
-            for side in ("top",):
-                ax2.spines[side].set_visible(False)
+            ax2.spines["top"].set_visible(False)
+            for side in ("left", "right", "bottom"):
+                ax2.spines[side].set_color("#B8C2CF")
             ax.set_zorder(ax2.get_zorder() + 1)
             ax.patch.set_visible(False)
     for sid in dict.fromkeys(a.subject_id for a in as_):
@@ -66,8 +67,20 @@ def progress(ax, gb: Gradebook, student_id: int, subject_id: int | None = None, 
     style(ax)
     ax.set_xticks(list(xs))
     ax.set_xticklabels([f"{first[k].name}\n{first[k].date:%d %b}" for k in keys], fontsize=7)
-    ax.legend(fontsize=7, frameon=False, loc="lower center", bbox_to_anchor=(0.5, -0.42), ncol=5)
+    legend_below(ax)
     return True
+
+
+def legend_below(ax) -> None:
+    """Legend under the whole figure: constrained layout reserves room for it, so it is never clipped."""
+    fig = ax.get_figure()
+    handles, labels = ax.get_legend_handles_labels()
+    for other in fig.axes:
+        if other is not ax:
+            h2, l2 = other.get_legend_handles_labels()
+            handles, labels = handles + h2, labels + l2
+    if handles:
+        fig.legend(handles, labels, loc="outside lower center", ncol=min(5, len(handles)), fontsize=7, frameon=False)
 
 
 def bars(ax, labels: list[str], values: list[float | None], colors=None, horizontal=False, pass_mark: float | None = None, second=None) -> None:
@@ -106,10 +119,10 @@ def figure_png(draw, width_in=7.2, height_in=2.6, dpi=160) -> bytes | None:
     """Render a drawing function to PNG bytes for PDFs. draw(ax) returns False to skip."""
     from matplotlib.figure import Figure
     fig = Figure(figsize=(width_in, height_in), dpi=dpi)
+    fig.set_layout_engine("constrained", h_pad=0.03, w_pad=0.03)
     ax = fig.add_subplot(111)
     if draw(ax) is False:
         return None
-    fig.subplots_adjust(left=0.07, right=0.94, top=0.95, bottom=0.34)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", facecolor="white")
     return buf.getvalue()

@@ -71,7 +71,7 @@ class Page(QWidget):
         head = QHBoxLayout()
         titles = QVBoxLayout()
         self.title = label(title, "title")
-        self.subtitle = label(subtitle, "subtitle")
+        self.subtitle = label(subtitle, "subtitle", wrap=True)
         titles.addWidget(self.title)
         titles.addWidget(self.subtitle)
         head.addLayout(titles)
@@ -117,12 +117,14 @@ class StatStrip(QWidget):
 
 class Table(QTableWidget):
     """Read-only table by default. set_rows() fills it; row ids are stored for double-click navigation."""
-    def __init__(self, headers: list[str], stretch: int | None = None, editable: bool = False):
+    def __init__(self, headers: list[str], stretch: int | None = None, editable: bool = False, multi: bool = False):
         super().__init__(0, len(headers))
         self.setHorizontalHeaderLabels(headers)
         self.verticalHeader().setVisible(False)
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        if multi:
+            self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         if not editable:
             self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         hh = self.horizontalHeader()
@@ -181,6 +183,10 @@ class Table(QTableWidget):
         r = self.currentRow()
         return self.ids[r] if 0 <= r < len(self.ids) else None
 
+    def selected_ids(self) -> list:
+        """Ids of every selected row, in the order shown."""
+        return [self.ids[r] for r in sorted({i.row() for i in self.selectedIndexes()}) if r < len(self.ids)]
+
 
 class Chart(FigureCanvasQTAgg):
     def __init__(self, height: float = 2.8):
@@ -189,13 +195,14 @@ class Chart(FigureCanvasQTAgg):
         self.setMinimumHeight(int(height * 90))
 
     def draw_with(self, fn, bottom: float = 0.2) -> None:
+        """bottom is kept for callers that need extra room under the axes (rotated labels, legends below)."""
         self.fig.clear()
+        self.fig.set_layout_engine("constrained", h_pad=0.03, w_pad=0.03)   # sizes margins from the real text
         ax = self.fig.add_subplot(111)
         ok = fn(ax)
         if ok is False:
             ax.set_axis_off()
             ax.text(0.5, 0.5, "No data yet", ha="center", va="center", color=theme.MUTED)
-        self.fig.subplots_adjust(left=0.1, right=0.93, top=0.95, bottom=bottom)
         self.draw_idle()
 
 

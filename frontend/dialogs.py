@@ -55,7 +55,7 @@ class StudentDialog(_Form):
         self.form.addRow("Full name", self.name)
         self.form.addRow("Reg. number", self.reg)
         self.form.addRow("Phone number", self.phone)
-        self.form.addRow("", label("Used later for automated messages. Stored as +255…", "muted"))
+        self.form.addRow("", label("Used later for automated messages. Stored as +255…", "muted", wrap=True))
         self.form.addRow("Class", self.cls)
         if student:
             self.form.addRow("", label("Moving a student to another class keeps their marks and attendance.", "muted", wrap=True))

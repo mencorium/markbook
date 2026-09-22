@@ -105,10 +105,22 @@ def save_subject(subject_id: int | None, *, name: str, code: str = "", subsidiar
 
 def delete_subject(subject_id: int) -> int:
     """Deletes the subject and (by cascade) its assessments and marks. Returns the number of assessments removed."""
+    return delete_subjects([subject_id])[1]
+
+
+def delete_subjects(subject_ids: list[int]) -> tuple[int, int]:
+    """Delete one or many subjects in a single transaction.
+    Returns (subjects deleted, assessments deleted) — the marks go with the assessments."""
     with session_scope() as s:
-        n = s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == subject_id)) or 0
-        s.delete(s.get(Subject, subject_id))
-        return n
+        subjects = assessments = 0
+        for sid in subject_ids:
+            x = s.get(Subject, sid)
+            if not x:
+                continue
+            assessments += s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == sid)) or 0
+            s.delete(x)
+            subjects += 1
+        return subjects, assessments
 
 
 # ---------------- students ----------------
@@ -169,9 +181,20 @@ def set_target(student_id: int, subject_id: int, grade: str | None) -> None:
         x.targets = t
 
 
-def delete_student(student_id: int) -> None:
+def delete_student(student_id: int) -> int:
+    return delete_students([student_id])
+
+
+def delete_students(student_ids: list[int]) -> int:
+    """Delete one or many students in a single transaction; their marks and attendance go with them."""
     with session_scope() as s:
-        s.delete(s.get(Student, student_id))
+        n = 0
+        for sid in student_ids:
+            x = s.get(Student, sid)
+            if x:
+                s.delete(x)
+                n += 1
+        return n
 
 
 def bulk_add_students(lines: str, class_name: str) -> int:
