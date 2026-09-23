@@ -136,6 +136,38 @@ def class_sheets(gb: Gradebook, class_id: int, show: str = "marks", null_reg: bo
     return [summary, *[subject_sheet(gb, class_id, x.id, show, null_reg) for x in subs]]
 
 
+def annual_sheets(book, null_reg: bool = True, show: str = "marks") -> list[Sheet]:
+    """The year: one sheet for the class, then one per subject with a column per term."""
+    sc, subs, grades = book.scale, book.subjects(), show == "grades"
+    gb = book.any
+    school = (gb.settings.get("school") or "").strip()
+    meta = ([school.upper()] if school else []) + [f"Class: {book.class_name}", f"Academic year: {book.year}",
+                                                   f"Report: Annual results ({', '.join(t.name for t in book.terms)})", book.weights_note()]
+    head = ["S/N", "Reg. No.", "Student Name", *[x.short for x in subs],
+            *((["Points", "Division"] if sc.div else ["Grade"]) if grades else ["Total", "Year %"]), "Position"]
+    body = []
+    for i, r in enumerate(book.ranked):
+        cells = [("" if x.id not in r.subjects else sc.letter(r.subjects[x.id].final) if grades else r1(r.subjects[x.id].final)) for x in subs]
+        if grades:
+            tail = ([r.div.points, r.div.div] if sc.div and r.div and r.div.complete else ["", ""] if sc.div else [sc.letter(r.overall)])
+        else:
+            tail = [r1(r.total), r1(r.overall)]
+        body.append([i + 1, reg_of(r.student.reg_no, null_reg), r.student.name, *cells, *tail, r.rank])
+    out = [Sheet(f"Year {book.year}", meta, head, body)]
+    for x in subs:
+        rows = []
+        for i, r in enumerate(book.ranked):
+            got = r.subjects.get(x.id)
+            if not got:
+                continue
+            pos, of = book.positions(x.id)
+            rows.append([i + 1, reg_of(r.student.reg_no, null_reg), r.student.name,
+                         *[r1(got.per_term.get(t.id)) for t in book.terms], r1(got.final), sc.letter(got.final), f"{pos.get(r.student.id, '-')} of {of}"])
+        out.append(Sheet(x.short, meta[:-1] + [f"Subject: {x.name}"],
+                         ["S/N", "Reg. No.", "Student Name", *[f"{t.name} %" for t in book.terms], "Year %", "Grade", "Position"], rows))
+    return out
+
+
 def class_list_sheet(gb: Gradebook, class_id: int, null_reg: bool = True) -> Sheet:
     return Sheet("Class list", _meta(gb, class_id, "Report: Class list"), ["S/N", "Reg. No.", "Student Name", "Phone"],
                  [[i + 1, reg_of(s.reg_no, null_reg), s.name, display_phone(s.phone)] for i, s in enumerate(gb.students_in(class_id))], left=(1, 2, 3))

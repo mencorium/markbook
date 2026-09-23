@@ -11,6 +11,10 @@ from backend.services import terms as T
 from backend.services.analytics import Gradebook
 
 
+def _sample_class(gb) -> int:
+    return next(c.id for c in gb.classes.values() if c.name == seed.SAMPLE_CLASS)
+
+
 def _ensure(name: str, year: str, starts: dt.date, ends: dt.date, weight: float = 1):
     """Reuse a term another test left behind (it may hold their assessments), else make it."""
     for t in T.list_terms(year):
@@ -35,7 +39,7 @@ def test_each_term_has_its_own_results(two_terms):
     t1, t2 = two_terms
     gb = Gradebook.load()
     assert gb.term.id == t1.id and gb.assessments and gb.days
-    cls = next(iter(gb.classes))
+    cls = _sample_class(gb)
     stu = gb.students_in(cls)[0]
     first = gb.summary(stu).overall
 
@@ -83,7 +87,7 @@ def test_promotion_suggests_the_next_class(name, expected):
 
 def test_rollover_rules(two_terms):
     gb = Gradebook.load()
-    cls = next(iter(gb.classes))
+    cls = _sample_class(gb)
     before = gb.summary(gb.students_in(cls)[0]).overall
     students = [s.id for s in gb.students_in(cls)]
 
@@ -102,3 +106,53 @@ def test_rollover_rules(two_terms):
     after = Gradebook.load().students
     assert not any(sid in after for sid in students)                        # the group is done
     R.restore_students(students)
+
+
+def test_annual_result_combines_terms_by_weight(two_terms):
+    from backend.services.annual import AnnualBook
+    t1, t2 = two_terms
+    gb = Gradebook.load(t1.id)
+    cls = _sample_class(gb)
+    subs = gb.class_subjects(cls)
+    T.set_current(t2.id)
+    for sub in subs:                                   # a second term of results
+        a = A.save_assessment(None, subject_id=sub.id, class_id=cls, type="Exam", name="T2 Exam",
+                              date=dt.date(int(t2.year), 9, 10), max_marks=100)
+        A.save_totals(a.id, {s.id: min(100.0, (gb.summary(s).overall or 50) + 10) for s in gb.students_in(cls)})
+
+    book = AnnualBook.load(t1.year, cls)
+    assert [t.id for t in book.terms] == [t1.id, t2.id] and len(book.ranked) == len(gb.students_in(cls))
+    top = book.ranked[0]
+    assert top.rank == 1 and top.terms_sat == 2
+
+    sub = book.subjects()[0]
+    got = top.subjects[sub.id]
+    first, second = got.per_term[t1.id], got.per_term[t2.id]
+    assert abs(got.final - (first * t1.weight + second * t2.weight) / (t1.weight + t2.weight)) < 1e-6
+    assert got.final > first                            # term 2 counts double and is the better term
+
+    assert book.scale.letter(top.overall)
+    pos, of = book.positions(sub.id)
+    assert of == len(book.ranked) and pos[top.student.id] >= 1
+    assert "weight" in book.weights_note()
+
+    # a student who sat only one term still gets a year mark, from that term alone
+    only_one = book.rows[0]
+    assert all(s.terms_sat in (1, 2) for s in only_one.subjects.values())
+
+
+def test_annual_outputs(two_terms, tmp_path):
+    from backend.services import exports, reports
+    from backend.services.annual import AnnualBook
+    t1, _ = two_terms
+    cls = _sample_class(Gradebook.load(t1.id))
+    book = AnnualBook.load(t1.year, cls)
+    if not book.ranked:
+        pytest.skip("no annual results in this run")
+    pdf = reports.annual_results_sheet(book, tmp_path / "annual.pdf")
+    cards = reports.annual_report_cards(book, Gradebook.load(None), reports.annual_order(book)[:2], tmp_path / "cards.pdf")
+    assert pdf.stat().st_size > 5000 and cards.stat().st_size > 10000
+    sheets = exports.annual_sheets(book)
+    assert sheets[0].name.startswith("Year") and len(sheets) == 1 + len(book.subjects())
+    assert [h for h in sheets[1].head if "Term" in h]           # a column per term
+    exports.write_xlsx(tmp_path / "annual.xlsx", sheets)

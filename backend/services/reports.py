@@ -200,6 +200,120 @@ def class_order(gb: Gradebook, class_id: int) -> list[int]:
     return ranked + [s.id for s in gb.students_in(class_id) if s.id not in ranked and gb.summary(s).overall is not None]
 
 
+# ---------------- annual (end of year) ----------------
+def annual_report_cards(book, whole_year: Gradebook, student_ids: list[int], path: str | Path) -> Path:
+    """One card per student for the whole year: every term's mark side by side, then the year mark."""
+    doc = _doc(path)
+    story: list = []
+    for i, sid in enumerate(student_ids):
+        if i:
+            story.append(PageBreak())
+        story += _annual_story(book, whole_year, sid, doc.width)
+    doc.build(story)
+    return Path(path)
+
+
+def _annual_story(book, whole_year: Gradebook, student_id: int, width: float) -> list:
+    row = book.row_for(student_id)
+    stu, sc = row.student, book.scale
+    gb = book.any
+    story: list = [_Label(stu.name)] + _header(gb, "ANNUAL PROGRESS REPORT", f"{book.class_name}  —  {book.year}")
+    of = len(book.ranked)
+    info = [["Name", stu.name, "Reg. No.", stu.reg_no or "–"],
+            ["Class", book.class_name, "Students in class", str(len(book.rows))],
+            ["Year average", "–" if row.overall is None else f"{row.overall:.1f}%  (grade {sc.letter(row.overall)})",
+             "Position in class", f"{row.rank} out of {of}" if row.rank else "–"],
+            ["Terms sat", f"{row.terms_sat} of {len(book.terms)}",
+             "Division" if sc.div else "Attendance",
+             (row.div.text() if row.div else "–") if sc.div else ("–" if row.att is None else f"{round(row.att)}%")]]
+    if sc.div:
+        info.append(["Attendance", "–" if row.att is None else f"{round(row.att)}%", "Grading", sc.label])
+    half = (width - 62 * mm) / 2
+    it = Table(info, colWidths=[28 * mm, half, 34 * mm, half])
+    it.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, LINE), ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+                            ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9), ("FONT", (2, 0), (2, -1), "Helvetica-Bold", 9),
+                            ("BACKGROUND", (0, 0), (0, -1), SOFT), ("BACKGROUND", (2, 0), (2, -1), SOFT),
+                            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+    story += [it, Spacer(1, 8)]
+    head = ["Subject", *[f"{t.name} %" for t in book.terms], "Year %", "Grade", *(["Points"] if sc.div else []), "Position", "Remark"]
+    rows, fails = [head], []
+    for i, sub in enumerate(book.subjects(), start=1):
+        got = row.subjects.get(sub.id)
+        if not got:
+            continue
+        pos, of_sub = book.positions(sub.id)
+        g = sc.letter(got.final)
+        if not sc.passing(got.final):
+            fails.append(len(rows))
+        rows.append([sub.name + (" (sub.)" if sub.subsidiary else ""),
+                     *[f1(got.per_term.get(t.id)) for t in book.terms], f1(got.final), g,
+                     *([str(sc.points(got.final))] if sc.div else []), f"{pos.get(stu.id, '–')} / {of_sub}", sc.remark(g)])
+    rows.append(["Total / Average", *[""] * len(book.terms), f"{row.total:.1f} / {f1(row.overall)}%", sc.letter(row.overall),
+                 *([str(row.div.points) if row.div and row.div.complete else "–"] if sc.div else []),
+                 f"{row.rank} / {of}" if row.rank else "–", sc.remark(sc.letter(row.overall)) if row.overall is not None else ""])
+    rest = (width - 46 * mm) / (len(head) - 1)
+    story.append(grid(rows, [46 * mm] + [rest] * (len(head) - 1), foot=True, extra=[("TEXTCOLOR", (len(book.terms) + 2, r), (len(book.terms) + 2, r), RED) for r in fails]))
+    notes = [book.weights_note()]
+    if sc.div:
+        notes.append(f"Division from {sc.best_note}" + ("; subsidiary (sub.) subjects are not counted." if sc.level == "A" else "."))
+    story.append(Paragraph("   ".join(notes), SMALL))
+    png = charts.figure_png(lambda ax: charts.progress(ax, whole_year, stu.id, attendance=False), 7.4, 2.5)
+    if png:
+        story += [Paragraph("Progress through the year", H2), Image(io.BytesIO(png), width=width, height=width * 2.5 / 7.4)]
+    cls = gb.classes.get(stu.class_id)
+
+    def comment(title, text, name):
+        box = Table([[Paragraph(text or "&nbsp;", P)]], colWidths=[width], rowHeights=[None if text else 16 * mm])
+        box.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#AAB4C0")), ("TOPPADDING", (0, 0), (-1, -1), 6),
+                                 ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("LEFTPADDING", (0, 0), (-1, -1), 7)]))
+        sig = Table([[f"Name: {name or '______________________'}", "Signature: ____________________"]], colWidths=[width / 2, width / 2])
+        sig.setStyle(TableStyle([("FONT", (0, 0), (-1, -1), "Helvetica", 9), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+        return KeepTogether([Paragraph(title, H2), box, Spacer(1, 4), sig])
+    story += [comment("Class teacher's comments", stu.remarks, cls.teacher if cls else ""),
+              comment("Head teacher's comments", "", gb.settings.get("head_teacher", ""))]
+    last = Table([["Promoted to: ____________________", "Parent's signature: ____________________"]], colWidths=[width / 2, width / 2])
+    last.setStyle(TableStyle([("FONT", (0, 0), (-1, -1), "Helvetica", 9), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 10)]))
+    story.append(last)
+    return story
+
+
+def annual_results_sheet(book, path: str | Path) -> Path:
+    """The whole class for the year: one row per student, one column per subject."""
+    doc = _doc(path, landscape(A4))
+    sc, subs = book.scale, book.subjects()
+    gb = book.any
+    story: list = [_Label(book.class_name)] + _header(gb, "ANNUAL RESULTS", f"{book.class_name}  —  {book.year}  —  {sc.label}")
+    if sc.div:
+        cnt = [sum(1 for r in book.ranked if r.div and r.div.complete and r.div.div == d) for d in DIVISIONS]
+        inc = sum(1 for r in book.ranked if not (r.div and r.div.complete))
+        story += [grid([[f"Division {d}" for d in DIVISIONS] + ["Incomplete", "Total"], cnt + [inc, len(book.ranked)]], zebra=False, align_left=()),
+                  Spacer(1, 10)]
+    head = ["Pos", "Reg. No.", "Student Name", *[x.short for x in subs], *(["Points", "Div"] if sc.div else []), "Total", "Year %"]
+    data = [head] + [[r.rank, r.student.reg_no or "", r.student.name,
+                      *[sc.letter(r.subjects[x.id].final) if x.id in r.subjects else "–" for x in subs],
+                      *([r.div.points, r.div.div] if sc.div and r.div and r.div.complete else ["–", "–"] if sc.div else []),
+                      f"{r.total:.1f}", f1(r.overall)] for r in book.ranked]
+    story += [grid(data, [12 * mm, 26 * mm, 52 * mm] + [(doc.width - 90 * mm) / (len(head) - 3)] * (len(head) - 3), align_left=(1, 2)),
+              Spacer(1, 10), Paragraph(book.weights_note(), SMALL), Spacer(1, 8)]
+    perf = [["Subject", *[f"{t.name} avg %" for t in book.terms], "Year avg %", "Pass rate"]]
+    for x in subs:
+        finals = [r.subjects[x.id].final for r in book.ranked if x.id in r.subjects]
+        per_term = []
+        for t in book.terms:
+            vals = [r.subjects[x.id].per_term[t.id] for r in book.ranked if x.id in r.subjects and t.id in r.subjects[x.id].per_term]
+            per_term.append(f1(sum(vals) / len(vals)) if vals else "–")
+        perf.append([x.name, *per_term, f1(sum(finals) / len(finals)) if finals else "–",
+                     f"{round(sum(1 for f in finals if sc.passing(f)) / len(finals) * 100)}%" if finals else "–"])
+    story.append(KeepTogether([Paragraph("Subject performance", H2),
+                               grid(perf, [60 * mm] + [(doc.width - 60 * mm) / (len(perf[0]) - 1)] * (len(perf[0]) - 1))]))
+    doc.build(story)
+    return Path(path)
+
+
+def annual_order(book) -> list[int]:
+    return [r.student.id for r in book.ranked]
+
+
 # ---------------- class result sheet ----------------
 def results_sheet(gb: Gradebook, class_id: int, path: str | Path) -> Path:
     doc = _doc(path, landscape(A4))
@@ -220,7 +334,8 @@ def results_sheet(gb: Gradebook, class_id: int, path: str | Path) -> Path:
         fs = [r.summary.subs[x.id].final for r in rank if x.id in r.summary.subs]
         perf.append([x.name, *[sum(1 for f in fs if sc.letter(f) == g) for g in sc.grades], f1(sum(fs) / len(fs)) if fs else "–",
                      f"{round(sum(1 for f in fs if sc.passing(f)) / len(fs) * 100)}%" if fs else "–"])
-    story += [Paragraph("Subject performance", H2), grid(perf, [60 * mm] + [(doc.width - 60 * mm) / (len(perf[0]) - 1)] * (len(perf[0]) - 1))]
+    story.append(KeepTogether([Paragraph("Subject performance", H2),
+                               grid(perf, [60 * mm] + [(doc.width - 60 * mm) / (len(perf[0]) - 1)] * (len(perf[0]) - 1))]))
     doc.build(story)
     return Path(path)
 

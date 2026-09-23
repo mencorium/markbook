@@ -48,6 +48,17 @@ and term, and a finished course archives its students.
 Upgrading an existing database puts everything already recorded into one term named after your old
 Term setting, so nothing is lost.
 
+**Annual results.** Results & reports → **Show: Whole year** combines every term of the academic
+year into a year mark per subject, weighted by each term's weight, then the year average, division
+and position. Terms a student did not sit are simply left out of their own average. From there:
+
+- **Annual result sheet (PDF)** — the class for the year, with each term's average per subject.
+- **Annual report cards (PDF)** — a column per term next to the year mark, grade, points and
+  position, plus a progress chart across the whole year and a "Promoted to" line.
+- **Export (Excel)** — one sheet for the class and one per subject, with a column per term.
+
+Individual term marks are never rewritten; the year view only combines them.
+
 ### First steps in the app
 
 1. **Settings → Terms & academic years → Add term**: name it, set the academic year and dates.
