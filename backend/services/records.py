@@ -6,6 +6,7 @@ import datetime as dt
 
 from sqlalchemy import func, select
 
+from .. import audit
 from ..db import session_scope
 from ..models import Assessment, ClassGroup, Setting, Student, Subject
 from ..phone import normalize_phone
@@ -16,9 +17,13 @@ class ValidationError(ValueError):
     """Raised with a message that can be shown to the user as-is."""
 
 
+class ConflictError(ValidationError):
+    """Someone (or another window) changed the same marks while this page was open."""
+
+
 # ---------------- settings ----------------
 DEFAULT_SETTINGS = {"school": "", "term": "", "ca_weight": 40, "head_teacher": "", "next_term": "",
-                    "auto_backup": True, "backup_dir": "", "last_backup": "", "pg_bin_dir": ""}
+                    "auto_backup": True, "backup_dir": "", "last_backup": "", "pg_bin_dir": "", "user_name": "", "current_term": ""}
 
 
 def get_settings() -> dict:
@@ -37,11 +42,13 @@ def save_settings(values: dict) -> None:
                 row.value = v
             else:
                 s.add(Setting(key=k, value=v))
+    if "user_name" in values:
+        audit.forget_user()
 
 
 # ---------------- classes ----------------
 def _class_info(c: ClassGroup) -> ClassInfo:
-    return ClassInfo(c.id, c.name, c.level, c.pass_mark, c.teacher or "", c.scale)
+    return ClassInfo(c.id, c.name, c.level, c.pass_mark, c.teacher or "", c.scale, c.year or "", c.rollover or "promote")
 
 
 def list_classes() -> list[ClassInfo]:
@@ -62,7 +69,8 @@ def get_or_create_class(name: str) -> ClassInfo:
         return _class_info(c)
 
 
-def save_class(class_id: int, *, name: str, level: str, pass_mark: float | None, teacher: str, scale: list | None = None) -> ClassInfo:
+def save_class(class_id: int, *, name: str, level: str, pass_mark: float | None, teacher: str, scale: list | None = None,
+               rollover: str | None = None, year: str | None = None) -> ClassInfo:
     name = name.strip()
     if not name:
         raise ValidationError("Enter a class name.")
@@ -75,6 +83,10 @@ def save_class(class_id: int, *, name: str, level: str, pass_mark: float | None,
         c = s.get(ClassGroup, class_id)
         c.name, c.level, c.pass_mark, c.teacher = name, level, pass_mark, teacher.strip()
         c.scale = scale if level == "custom" else None
+        if rollover:
+            c.rollover = rollover
+        if year is not None:
+            c.year = year
         return _class_info(c)
 
 
@@ -103,7 +115,9 @@ def archive_subjects(subject_ids: list[int]) -> tuple[int, int]:
             x = s.get(Subject, sid)
             if x and x.archived_at is None:
                 x.archived_at = now
-                assessments += s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == sid)) or 0
+                hidden = s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == sid)) or 0
+                audit.log(s, "subject.archived", entity="subject", entity_id=sid, detail=f"{x.name}, hiding {hidden} assessment(s)")
+                assessments += hidden
                 subjects += 1
         return subjects, assessments
 
@@ -115,6 +129,7 @@ def restore_subjects(subject_ids: list[int]) -> int:
             x = s.get(Subject, sid)
             if x and x.archived_at is not None:
                 x.archived_at = None
+                audit.log(s, "subject.restored", entity="subject", entity_id=sid, detail=x.name)
                 n += 1
         return n
 
@@ -148,7 +163,9 @@ def delete_subjects(subject_ids: list[int]) -> tuple[int, int]:
             x = s.get(Subject, sid)
             if not x:
                 continue
-            assessments += s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == sid)) or 0
+            n = s.scalar(select(func.count()).select_from(Assessment).where(Assessment.subject_id == sid)) or 0
+            audit.log(s, "subject.deleted", entity="subject", entity_id=sid, detail=f"{x.name} with {n} assessment(s) and their marks")
+            assessments += n
             s.delete(x)
             subjects += 1
         return subjects, assessments
@@ -177,6 +194,7 @@ def archive_students(student_ids: list[int]) -> int:
             x = s.get(Student, sid)
             if x and x.archived_at is None:
                 x.archived_at = now
+                audit.log(s, "student.archived", entity="student", entity_id=sid, student_id=sid, detail=x.name)
                 n += 1
         return n
 
@@ -188,6 +206,7 @@ def restore_students(student_ids: list[int]) -> int:
             x = s.get(Student, sid)
             if x and x.archived_at is not None:
                 x.archived_at = None
+                audit.log(s, "student.restored", entity="student", entity_id=sid, student_id=sid, detail=x.name)
                 n += 1
         return n
 
@@ -248,6 +267,8 @@ def delete_students(student_ids: list[int]) -> int:
         for sid in student_ids:
             x = s.get(Student, sid)
             if x:
+                audit.log(s, "student.deleted", entity="student", entity_id=sid, student_id=sid,
+                          detail=f"{x.name} ({x.reg_no or 'no reg. no.'}) and all their marks")
                 s.delete(x)
                 n += 1
         return n

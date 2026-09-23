@@ -13,7 +13,7 @@ from ..db import session_scope
 from ..grading import Division, Scale, make_scale
 from ..models import Assessment, AttendanceDay, ClassGroup, Mark, Question, QuestionMark, Student, Subject
 from ..paper import Q, Sec, paper_total
-from ..schema import AssessmentInfo, AttendanceDayInfo, ClassInfo, QuestionInfo, SectionInfo, StudentInfo, SubjectInfo
+from ..schema import AssessmentInfo, AttendanceDayInfo, ClassInfo, QuestionInfo, SectionInfo, StudentInfo, SubjectInfo, TermInfo
 from .records import get_settings
 
 
@@ -144,7 +144,7 @@ def discrimination_label(d: float | None) -> str:
 
 
 class Gradebook:
-    def __init__(self, settings, classes, subjects, students, assessments, totals, qmarks, days):
+    def __init__(self, settings, classes, subjects, students, assessments, totals, qmarks, days, term=None):
         self.settings: dict = settings
         self.classes: dict[int, ClassInfo] = classes
         self.subjects: dict[int, SubjectInfo] = subjects
@@ -154,11 +154,15 @@ class Gradebook:
         self.totals: dict[int, dict[int, float]] = totals
         self.qmarks: dict[int, dict[int, dict]] = qmarks
         self.days: list[AttendanceDayInfo] = days
+        self.term: TermInfo | None = term        # None means every term at once
         self._c: dict = {}
 
     # ---------------- loading ----------------
     @classmethod
-    def load(cls) -> "Gradebook":
+    def load(cls, term_id: int | None = -1) -> "Gradebook":
+        """term_id: an id to scope to that term, None for every term, -1 (default) for the current term."""
+        from .terms import current_term, get_term
+        term = current_term() if term_id == -1 else get_term(term_id)
         with session_scope() as s:
             classes = {c.id: ClassInfo(c.id, c.name, c.level, c.pass_mark, c.teacher or "", c.scale) for c in s.scalars(select(ClassGroup))}
             # archived students and subjects stay in the database but take no part in any calculation
@@ -167,17 +171,23 @@ class Gradebook:
                         for x in s.scalars(select(Student).where(Student.archived_at.is_(None)))}
             assessments = [AssessmentInfo(a.id, a.subject_id, a.class_id, a.type, a.name, a.date, float(a.max_marks), list(a.topics or []),
                                           [SectionInfo(x.id, x.name, x.pick) for x in a.sections],
-                                          [QuestionInfo(q.id, q.label, q.topic, float(q.max_marks), q.section_id) for q in a.questions])
-                           for a in s.scalars(select(Assessment)) if a.subject_id in subjects]   # archived subjects drop out here
+                                          [QuestionInfo(q.id, q.label, q.topic, float(q.max_marks), q.section_id) for q in a.questions],
+                                          a.term_id)
+                           for a in s.scalars(select(Assessment).where(Assessment.term_id == term.id) if term else select(Assessment))
+                           if a.subject_id in subjects]          # archived subjects and other terms drop out here
+            keep = {a.id for a in assessments}
             totals: dict[int, dict[int, float]] = {}
             for m in s.scalars(select(Mark)):
-                totals.setdefault(m.assessment_id, {})[m.student_id] = float(m.score)
+                if m.assessment_id in keep:
+                    totals.setdefault(m.assessment_id, {})[m.student_id] = float(m.score)
             qmarks: dict[int, dict[int, dict]] = {}
             for qm, aid in s.execute(select(QuestionMark, Question.assessment_id).join(Question, Question.id == QuestionMark.question_id)):
-                qmarks.setdefault(aid, {}).setdefault(qm.student_id, {})[qm.question_id] = float(qm.score)
-            days = [AttendanceDayInfo(d.id, d.class_id, d.date, [e.student_id for e in d.entries], [e.student_id for e in d.entries if not e.present])
-                    for d in s.scalars(select(AttendanceDay))]
-        return cls(get_settings(), classes, subjects, students, assessments, totals, qmarks, days)
+                if aid in keep:
+                    qmarks.setdefault(aid, {}).setdefault(qm.student_id, {})[qm.question_id] = float(qm.score)
+            days = [AttendanceDayInfo(d.id, d.class_id, d.date, [e.student_id for e in d.entries],
+                                      [e.student_id for e in d.entries if not e.present], d.term_id)
+                    for d in s.scalars(select(AttendanceDay).where(AttendanceDay.term_id == term.id) if term else select(AttendanceDay))]
+        return cls(get_settings(), classes, subjects, students, assessments, totals, qmarks, days, term)
 
     def _m(self, key, fn):
         if key not in self._c:
@@ -185,6 +195,10 @@ class Gradebook:
         return self._c[key]
 
     # ---------------- basics ----------------
+    @property
+    def term_label(self) -> str:
+        return self.term.label if self.term else "All terms"
+
     @property
     def ca_weight(self) -> float:
         return float(self.settings.get("ca_weight", 40)) / 100

@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (QComboBox, QFileDialog, QPushButton, QTableWidgetIt
 from backend.services import assessments as A
 from backend.services import charts, drafts, exports, reports
 from backend.services.analytics import difficulty, discrimination_label
+from backend.services.records import ConflictError
 
 from .. import theme
 from ..dialogs import AssessmentDialog
@@ -209,6 +210,9 @@ class MarkEntryPage(Page):
                 it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.grid.setItem(r, 1, it)
             self._update_row(r)
+        # what the marks were when this page was loaded: checked on save so two windows cannot overwrite each other
+        self.baseline = {self.grid.item(r, 0).data(Qt.ItemDataRole.UserRole): gb.score(a, self.grid.item(r, 0).data(Qt.ItemDataRole.UserRole))
+                         for r in range(self.grid.rowCount())}
         self.grid.resizeColumnsToContents()
         self.grid.setColumnWidth(0, max(200, self.grid.columnWidth(0)))
         self.grid.fit(40)
@@ -351,12 +355,18 @@ class MarkEntryPage(Page):
         if bad:
             return error(self, "These entries are not numbers:\n\n" + "\n".join(bad[:8])
                          + (f"\n…and {len(bad) - 8} more" if len(bad) > 8 else ""))
-        if a.is_paper:
-            already = self.app.gb.qmarks.get(a.id, {})
-            rows = {sid: row_ for sid, row_ in values.items() if any(v is not None for v in row_.values()) or sid in already}
-            A.save_question_marks(a.id, rows)
-        else:
-            A.save_totals(a.id, values)
+        try:
+            if a.is_paper:
+                already = self.app.gb.qmarks.get(a.id, {})
+                rows = {sid: row_ for sid, row_ in values.items() if any(v is not None for v in row_.values()) or sid in already}
+                A.save_question_marks(a.id, rows, expected=self.baseline)
+            else:
+                A.save_totals(a.id, values, expected=self.baseline)
+        except ConflictError as e:
+            self._write_draft()                  # keep what was typed before showing the current marks
+            if confirm(self, f"{e}\n\nReload now? The marks you typed are kept and put back in the grid."):
+                self.app.reload()
+            return
         self.dirty = False
         drafts.delete_draft(a.id)                # saved for real: the draft is no longer needed
         self.draft_bar.setVisible(False)

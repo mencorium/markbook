@@ -8,6 +8,23 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class TermInfo:
+    id: int
+    name: str
+    year: str
+    starts_on: dt.date
+    ends_on: dt.date
+    weight: float = 1.0
+
+    @property
+    def label(self) -> str:
+        return f"{self.name} · {self.year}"
+
+    def covers(self, day: dt.date) -> bool:
+        return self.starts_on <= day <= self.ends_on
+
+
+@dataclass
 class ClassInfo:
     id: int
     name: str
@@ -15,6 +32,8 @@ class ClassInfo:
     pass_mark: float | None = None
     teacher: str = ""
     scale: list | None = None
+    year: str = ""
+    rollover: str = "promote"
 
 
 @dataclass
@@ -70,6 +89,7 @@ class AssessmentInfo:
     topics: list = field(default_factory=list)
     sections: list[SectionInfo] = field(default_factory=list)
     questions: list[QuestionInfo] = field(default_factory=list)
+    term_id: int | None = None
 
     @property
     def is_paper(self) -> bool:
@@ -93,3 +113,4 @@ class AttendanceDayInfo:
     date: dt.date
     roster: list[int]
     absent: list[int]
+    term_id: int | None = None

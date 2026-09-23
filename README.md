@@ -32,12 +32,29 @@ python -m backend.seed             # optional: add the sample class
 python main.py                     # the schema is created or migrated automatically on start
 ```
 
+### Terms and academic years
+
+A term is whatever period you teach in — two six-month terms, three shorter ones, or a short
+course. Set them up in **Settings → Terms & academic years**, then switch term with the picker at
+the top left ("All terms" shows everything together). Marks and registers belong to the term their
+date falls in, so each term has its own averages, positions and divisions and last term stops
+dragging on this one.
+
+Each class has a rule for the end of the year — students move up, the class carries on, or a short
+course finishes. **Start the next term…** creates the term and applies those rules in one step:
+promoted students move to the next class while the marks they already have stay with the old class
+and term, and a finished course archives its students.
+
+Upgrading an existing database puts everything already recorded into one term named after your old
+Term setting, so nothing is lost.
+
 ### First steps in the app
 
-1. **Students → Add class** (or Settings → Classes & grading → Add class): name it and choose A-Level, O-Level or a custom scale.
-2. **Students → Add student** or **Add many** to fill the class list. You can also type a new class name straight into the student dialog, or let a class be created by an import.
-3. **Subjects → Add subject**, marking General Studies and similar as subsidiary.
-4. **Tests & exams → New assessment**, then enter marks.
+1. **Settings → Terms & academic years → Add term**: name it, set the academic year and dates.
+2. **Students → Add class** (or Settings → Classes & grading → Add class): name it and choose A-Level, O-Level or a custom scale.
+3. **Students → Add student** or **Add many** to fill the class list. You can also type a new class name straight into the student dialog, or let a class be created by an import.
+4. **Subjects → Add subject**, marking General Studies and similar as subsidiary.
+5. **Tests & exams → New assessment**, then enter marks.
 
 Remove the sample data at any time with `python -m backend.seed --remove` or from **Settings → Remove sample data**.
 
@@ -62,6 +79,18 @@ results, report cards and exports, but every mark and attendance record is kept.
 archived** on the Students or Subjects page to see what is archived, restore it, or delete it for
 good. Archiving a subject hides its assessments too. Deleting for good is the only irreversible
 action in the app.
+
+**Change history.** Every mark entered, changed or removed is recorded with the value before and
+after, who made the change and when, as are archives, restores, deletions, imports and backup
+restores. See it all on the **Activity** page, filtered by kind or searched by name. History has
+no foreign keys, so it survives the student or assessment being deleted — an old mark can always
+be accounted for. The name changes are recorded under is set in Settings ("Changes recorded as");
+it defaults to the computer's user name.
+
+**Two windows at once.** Marks are saved with a check against what they were when the page was
+opened. If they changed in the meantime — another window, another teacher on a shared database —
+the save is refused, the differences are listed, and nothing is overwritten. Reloading keeps what
+you typed and puts it back in the grid against the current marks.
 
 **Logs.** Problems are written to a rotating log (`logs/markbook.log` in the app folder, path
 shown in Settings). Send that file along when reporting a bug.
@@ -99,6 +128,7 @@ markbook_desktop/
 │   ├── db.py                  Engine, session_scope(), create_schema()
 │   ├── migrate.py             Runs pending migrations at startup
 │   ├── log.py                 Rotating log file
+│   ├── audit.py               Change history (who changed what, and when)
 │   ├── paths.py               Where logs, drafts and backups are kept
 │   ├── models.py              SQLAlchemy tables
 │   ├── schemas.py             Plain dataclasses handed to the UI
@@ -110,6 +140,7 @@ markbook_desktop/
 │       ├── records.py         Settings, classes, subjects, students (CRUD + validation)
 │       ├── assessments.py     Assessments, question papers, marks
 │       ├── attendance.py      Daily registers
+│       ├── terms.py           Terms, academic years and class rollover
 │       ├── analytics.py       Gradebook: every calculation (results, ranking, predictions, topic/question analysis)
 │       ├── comments.py        Suggested class-teacher comments from real results
 │       ├── exports.py         Excel (styled) and CSV sheets

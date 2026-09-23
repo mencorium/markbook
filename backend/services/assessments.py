@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
+from .. import audit
 from ..db import session_scope
-from ..models import Assessment, Mark, PaperSection, Question, QuestionMark
+from ..models import Assessment, Mark, PaperSection, Question, QuestionMark, Student
 from ..paper import Q, Sec, paper_max, paper_total
-from .records import ValidationError
-from ..schema import AssessmentInfo, SectionInfo, QuestionInfo
+from ..schema import AssessmentInfo, QuestionInfo, SectionInfo
+from .records import ConflictError, ValidationError
 
 TYPES = ["Test", "Quiz", "Assignment", "Exam"]
+
+
+def _term_for(date: dt.date) -> int | None:
+    """The term covering this date, else the current one — so marks always land in a term."""
+    from .terms import current_term, term_for_date
+    t = term_for_date(date) or current_term()
+    return t.id if t else None
 
 
 def _info(a: Assessment) -> AssessmentInfo:
@@ -20,16 +28,19 @@ def _info(a: Assessment) -> AssessmentInfo:
         a.id, a.subject_id, a.class_id, a.type, a.name, a.date, float(a.max_marks), list(a.topics or []),
         [SectionInfo(s.id, s.name, s.pick) for s in a.sections],
         [QuestionInfo(q.id, q.label, q.topic, float(q.max_marks), q.section_id) for q in a.questions],
+        a.term_id,
     )
 
 
-def list_assessments(class_id: int | None = None, subject_id: int | None = None) -> list[AssessmentInfo]:
+def list_assessments(class_id: int | None = None, subject_id: int | None = None, term_id: int | None = None) -> list[AssessmentInfo]:
     with session_scope() as s:
         q = select(Assessment).order_by(Assessment.date, Assessment.name)
         if class_id:
             q = q.where(Assessment.class_id == class_id)
         if subject_id:
             q = q.where(Assessment.subject_id == subject_id)
+        if term_id:
+            q = q.where(Assessment.term_id == term_id)
         return [_info(a) for a in s.scalars(q)]
 
 
@@ -40,7 +51,8 @@ def get_assessment(assessment_id: int) -> AssessmentInfo | None:
 
 
 def save_assessment(assessment_id: int | None, *, subject_id: int, class_id: int, type: str, name: str,
-                    date: dt.date, max_marks: float | None = None, topics: list[str] | None = None) -> AssessmentInfo:
+                    date: dt.date, max_marks: float | None = None, topics: list[str] | None = None,
+                    term_id: int | None = None) -> AssessmentInfo:
     if not name.strip():
         raise ValidationError("Give the assessment a name, such as Test 2.")
     if type not in TYPES:
@@ -48,6 +60,7 @@ def save_assessment(assessment_id: int | None, *, subject_id: int, class_id: int
     with session_scope() as s:
         a = s.get(Assessment, assessment_id) if assessment_id else Assessment(topics=[])
         a.subject_id, a.class_id, a.type, a.name, a.date = subject_id, class_id, type, name.strip(), date
+        a.term_id = term_id if term_id else _term_for(date)
         if not a.questions:                               # papers derive max and topics from their questions
             if not max_marks or max_marks <= 0:
                 raise ValidationError("'Out of' must be more than 0.")
@@ -61,7 +74,11 @@ def save_assessment(assessment_id: int | None, *, subject_id: int, class_id: int
 
 def delete_assessment(assessment_id: int) -> None:
     with session_scope() as s:
-        s.delete(s.get(Assessment, assessment_id))
+        a = s.get(Assessment, assessment_id)
+        marks = s.scalar(select(func.count()).select_from(Mark).where(Mark.assessment_id == assessment_id)) or 0
+        audit.log(s, "assessment.deleted", entity="assessment", entity_id=assessment_id, assessment_id=assessment_id,
+                  detail=f"{a.name} ({a.type}) with {marks} mark(s)")
+        s.delete(a)
 
 
 # ---------------- marks ----------------
@@ -77,25 +94,61 @@ def get_marks(assessment_id: int) -> tuple[dict[int, float], dict[int, dict]]:
         return totals, qrows
 
 
-def save_totals(assessment_id: int, totals: dict[int, float | None]) -> int:
-    """Simple (non-paper) assessments. None removes a mark (absent)."""
+def _same(a: float | None, b: float | None) -> bool:
+    return (a is None and b is None) or (a is not None and b is not None and abs(a - b) < 1e-6)
+
+
+def _check_conflicts(s, assessment_id: int, expected: dict[int, float | None] | None, existing: dict[int, Mark]) -> None:
+    """Refuse to overwrite marks that changed after this page was opened (another window, or another teacher)."""
+    if not expected:
+        return
+    clashes = []
+    for sid, was in expected.items():
+        now = existing[sid].score if sid in existing else None
+        if not _same(was, now):
+            clashes.append((sid, was, now))
+    if not clashes:
+        return
+    names = {x.id: x.name for x in s.scalars(select(Student).where(Student.id.in_([c[0] for c in clashes])))}
+    shown = "; ".join(f"{names.get(sid, 'a student')}: {'absent' if was is None else f'{was:g}'} → "
+                      f"{'absent' if now is None else f'{now:g}'}" for sid, was, now in clashes[:5])
+    more = f" and {len(clashes) - 5} more" if len(clashes) > 5 else ""
+    raise ConflictError("These marks were changed elsewhere while this page was open:\n\n"
+                        f"{shown}{more}\n\nReload the assessment so you can see the current marks, then make your changes again.")
+
+
+def save_totals(assessment_id: int, totals: dict[int, float | None], expected: dict[int, float | None] | None = None) -> int:
+    """Simple (non-paper) assessments. None removes a mark (absent).
+    expected: the marks as they were when the page was loaded, checked before anything is written."""
+    who, now = audit.current_user(), dt.datetime.now()
     with session_scope() as s:
         a = s.get(Assessment, assessment_id)
         for sid, v in totals.items():
             if v is not None and not 0 <= v <= a.max_marks:
                 raise ValidationError(f"Scores must be between 0 and {a.max_marks:g}.")
         existing = {m.student_id: m for m in s.scalars(select(Mark).where(Mark.assessment_id == assessment_id))}
+        _check_conflicts(s, assessment_id, expected, existing)
         n = 0
         for sid, v in totals.items():
             m = existing.get(sid)
+            before = m.score if m else None
+            if _same(before, v):
+                continue
             if v is None:
-                if m:
-                    s.delete(m)
+                s.delete(m)
+                audit.log(s, "mark.removed", entity="mark", entity_id=m.id, student_id=sid, assessment_id=assessment_id,
+                          old=before, detail=a.name, who=who)
             elif m:
-                m.score = v
+                m.score, m.updated_at, m.updated_by = v, now, who
+                audit.log(s, "mark.changed", entity="mark", entity_id=m.id, student_id=sid, assessment_id=assessment_id,
+                          old=before, new=v, detail=a.name, who=who)
                 n += 1
             else:
-                s.add(Mark(assessment_id=assessment_id, student_id=sid, score=v))
+                mark = Mark(assessment_id=assessment_id, student_id=sid, score=v, updated_at=now, updated_by=who)
+                s.add(mark)
+                s.flush()
+                audit.log(s, "mark.added", entity="mark", entity_id=mark.id, student_id=sid, assessment_id=assessment_id,
+                          new=v, detail=a.name, who=who)
                 n += 1
         return n
 
@@ -105,8 +158,11 @@ def _paper_parts(a: Assessment) -> tuple[list[Sec], list[Q]]:
             [Q(q.id, q.label, q.topic, float(q.max_marks), q.section_id) for q in a.questions])
 
 
-def save_question_marks(assessment_id: int, rows: dict[int, dict[int, float | None]]) -> int:
-    """rows: {student_id: {question_id: score or None}}. Blank = not answered. Totals are recomputed."""
+def save_question_marks(assessment_id: int, rows: dict[int, dict[int, float | None]],
+                        expected: dict[int, float | None] | None = None) -> int:
+    """rows: {student_id: {question_id: score or None}}. Blank = not answered. Totals are recomputed.
+    expected: each student's total as it was when the page was loaded (checked before writing)."""
+    who, stamp = audit.current_user(), dt.datetime.now()
     with session_scope() as s:
         a = s.get(Assessment, assessment_id)
         secs, qs = _paper_parts(a)
@@ -118,6 +174,7 @@ def save_question_marks(assessment_id: int, rows: dict[int, dict[int, float | No
         existing = {(m.student_id, m.question_id): m for m in s.execute(
             select(QuestionMark).join(Question, Question.id == QuestionMark.question_id).where(Question.assessment_id == assessment_id)).scalars()}
         totals = {m.student_id: m for m in s.scalars(select(Mark).where(Mark.assessment_id == assessment_id))}
+        _check_conflicts(s, assessment_id, expected, totals)
         n = 0
         for sid, row in rows.items():
             for qid, v in row.items():
@@ -132,14 +189,24 @@ def save_question_marks(assessment_id: int, rows: dict[int, dict[int, float | No
             clean = {qid: v for qid, v in row.items() if v is not None}
             total, _ = paper_total(secs, qs, clean)
             t = totals.get(sid)
+            before = t.score if t else None
             if total is None:
                 if t:
                     s.delete(t)
+                    audit.log(s, "mark.removed", entity="mark", entity_id=t.id, student_id=sid, assessment_id=assessment_id,
+                              old=before, detail=f"{a.name} (per question)", who=who)
             elif t:
-                t.score = total
+                if not _same(before, total):
+                    audit.log(s, "mark.changed", entity="mark", entity_id=t.id, student_id=sid, assessment_id=assessment_id,
+                              old=before, new=total, detail=f"{a.name} (per question)", who=who)
+                t.score, t.updated_at, t.updated_by = total, stamp, who
                 n += 1
             else:
-                s.add(Mark(assessment_id=assessment_id, student_id=sid, score=total))
+                mark = Mark(assessment_id=assessment_id, student_id=sid, score=total, updated_at=stamp, updated_by=who)
+                s.add(mark)
+                s.flush()
+                audit.log(s, "mark.added", entity="mark", entity_id=mark.id, student_id=sid, assessment_id=assessment_id,
+                          new=total, detail=f"{a.name} (per question)", who=who)
                 n += 1
         return n
 

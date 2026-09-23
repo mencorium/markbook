@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from PyQt6.QtCore import QDate
+from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLineEdit,
                              QPlainTextEdit, QTableWidgetItem, QVBoxLayout)
 
@@ -95,6 +95,83 @@ class BulkStudentsDialog(_Form):
         return None if self.text.toPlainText().strip() and self.cls.currentText().strip() else "Enter at least one name and a class."
 
 
+class TermDialog(_Form):
+    """Create or edit a term: any length the school uses."""
+    def __init__(self, parent, term=None, suggestion: dict | None = None):
+        super().__init__(parent, "Edit term" if term else "Add a term")
+        sug = suggestion or {}
+        self.name = QLineEdit(term.name if term else sug.get("name", "Term 1"))
+        self.year = QLineEdit(term.year if term else sug.get("year", str(dt.date.today().year)))
+        self.year.setPlaceholderText("2026 or 2026/2027")
+        self.starts = QDateEdit()
+        self.ends = QDateEdit()
+        for w, value in ((self.starts, term.starts_on if term else sug.get("starts", dt.date.today())),
+                         (self.ends, term.ends_on if term else sug.get("ends", dt.date.today() + dt.timedelta(days=180)))):
+            w.setCalendarPopup(True)
+            w.setDate(QDate(value.year, value.month, value.day))
+        self.weight = QDoubleSpinBox()
+        self.weight.setRange(0.1, 10)
+        self.weight.setSingleStep(0.5)
+        self.weight.setValue(term.weight if term else 1)
+        self.form.addRow("Name", self.name)
+        self.form.addRow("Academic year", self.year)
+        self.form.addRow("Starts", self.starts)
+        self.form.addRow("Ends", self.ends)
+        self.form.addRow("Weight in the annual result", self.weight)
+        self.form.addRow("", label("A term is whatever period you teach in — two six-month terms, three shorter ones, or a short course. "
+                                   "Marks and attendance belong to the term their date falls in.", "muted", wrap=True))
+        self.finish()
+
+    def validate(self):
+        if not self.name.text().strip():
+            return "Give the term a name, such as Term 1."
+        if not self.year.text().strip():
+            return "Enter the academic year."
+        if self.ends.date() < self.starts.date():
+            return "The term cannot end before it starts."
+        return None
+
+    def values(self) -> dict:
+        d = lambda w: dt.date(w.date().year(), w.date().month(), w.date().day())
+        return {"name": self.name.text().strip(), "year": self.year.text().strip(),
+                "starts_on": d(self.starts), "ends_on": d(self.ends), "weight": self.weight.value()}
+
+
+class StartTermDialog(TermDialog):
+    """The next term, plus what happens to each class: promote, carry on, or finish."""
+    def __init__(self, parent, classes: list, suggestion: dict | None = None):
+        super().__init__(parent, None, suggestion)
+        self.setWindowTitle("Start the next term")
+        from backend.services.terms import ROLLOVER, next_class_name
+        self.rows = []
+        self.table = Table(["Class", "At the end of the year", "Moves to"], stretch=0, editable=True)
+        self.table.setRowCount(len(classes))
+        for r, c in enumerate(classes):
+            item = QTableWidgetItem(c.name)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(r, 0, item)
+            combo = QComboBox()
+            for key, text in ROLLOVER.items():
+                combo.addItem(text, key)
+            combo.setCurrentIndex(max(0, combo.findData(c.rollover or "promote")))
+            self.table.setCellWidget(r, 1, combo)
+            self.table.setItem(r, 2, QTableWidgetItem(next_class_name(c.name)))
+            self.rows.append((c, combo))
+        self.table.fit()
+        self.lay.insertWidget(1, label("What happens to each class", "h2"))
+        self.lay.insertWidget(2, self.table)
+        self.lay.insertWidget(3, label("Promoted students move to the next class; the marks they already have stay with the old class and term. "
+                                       "A finished course archives its students, who can be restored at any time.", "muted", wrap=True))
+        self.resize(720, 560)
+
+    def plan(self) -> list[dict]:
+        out = []
+        for r, (cls, combo) in enumerate(self.rows):
+            target = self.table.item(r, 2)
+            out.append({"class_id": cls.id, "action": combo.currentData(), "target": target.text().strip() if target else ""})
+        return out
+
+
 class ClassDialog(_Form):
     """Create a class (or edit its name, teacher and grading)."""
     def __init__(self, parent, existing_names: list[str], cls=None):
@@ -110,6 +187,11 @@ class ClassDialog(_Form):
         self.pass_mark = QDoubleSpinBox()
         self.pass_mark.setRange(0, 100)
         self.pass_mark.setSuffix("%")
+        from backend.services.terms import ROLLOVER
+        self.rollover = QComboBox()
+        for key, text in ROLLOVER.items():
+            self.rollover.addItem(text, key)
+        self.rollover.setCurrentIndex(max(0, self.rollover.findData(cls.rollover if cls else "promote")))
         self.level.currentIndexChanged.connect(self._level_changed)
         self.level.setCurrentIndex(max(0, self.level.findData(cls.level if cls else "A")))
         self.pass_mark.setValue(cls.pass_mark if cls and cls.pass_mark is not None else self._default_pass())
@@ -117,6 +199,7 @@ class ClassDialog(_Form):
         self.form.addRow("Class teacher", self.teacher)
         self.form.addRow("Grading", self.level)
         self.form.addRow("Pass mark", self.pass_mark)
+        self.form.addRow("At the end of the year", self.rollover)
         self.form.addRow("", label("A-Level takes the division from the best 3 principal subjects, O-Level from the best 7. "
                                    "A custom scale can be set up afterwards in Settings.", "muted", wrap=True))
         self.finish()
@@ -138,7 +221,7 @@ class ClassDialog(_Form):
 
     def values(self) -> dict:
         return {"name": self.name.text().strip(), "teacher": self.teacher.text().strip(),
-                "level": self.level.currentData(), "pass_mark": self.pass_mark.value()}
+                "level": self.level.currentData(), "pass_mark": self.pass_mark.value(), "rollover": self.rollover.currentData()}
 
 
 class SubjectDialog(_Form):

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QStackedWidget, QVBoxLayout,
+                             QWidget)
 
 import datetime as dt
 
@@ -13,8 +14,11 @@ from backend.config import get_config
 from backend.log import get as get_logger
 from backend.services import backup as BK
 from backend.services import records as R
+from backend.services import terms as T
 from backend.services.analytics import Gradebook
 
+from . import theme
+from .pages.activity import ActivityPage
 from .pages.assessments import AssessmentsPage
 from .pages.attendance import AttendancePage
 from .pages.dashboard import DashboardPage
@@ -26,10 +30,10 @@ from .pages.student_detail import StudentDetailPage
 from .pages.students import StudentsPage
 from .pages.subjects import SubjectsPage
 from .pages.topics import TopicsPage
-from .widgets import label
+from .widgets import fill_combo, label
 
 NAV = [("dashboard", "Overview"), ("students", "Students"), ("subjects", "Subjects"), ("assessments", "Tests & exams"),
-       ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("settings", "Settings")]
+       ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("activity", "Activity"), ("settings", "Settings")]
 
 
 class MainWindow(QMainWindow):
@@ -38,6 +42,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Markbook — student progress")
         self.resize(1320, 860)
         self.gb: Gradebook = Gradebook.load()
+        self.term_id: int | None = self.gb.term.id if self.gb.term else None
         self.class_id: int | None = None
         self.student_id: int | None = None
         self.assessment_id: int | None = None
@@ -52,6 +57,16 @@ class MainWindow(QMainWindow):
         sv.setContentsMargins(0, 0, 0, 0)
         sv.setSpacing(0)
         sv.addWidget(label("✓ Markbook", "brand"))
+        self.term_box = QComboBox()
+        self.term_box.currentIndexChanged.connect(self._term_changed)
+        picker = QWidget()
+        pv = QVBoxLayout(picker)
+        pv.setContentsMargins(12, 0, 12, 10)
+        pv.setSpacing(3)
+        pv.addWidget(label("TERM", "statLabel"))
+        pv.addWidget(self.term_box)
+        picker.setStyleSheet(f"background: {theme.SURFACE};")
+        sv.addWidget(picker)
         self.nav = QListWidget()
         self.nav.setObjectName("sidebar")
         for key, text in NAV:
@@ -71,13 +86,33 @@ class MainWindow(QMainWindow):
             "dashboard": DashboardPage(self), "students": StudentsPage(self), "student": StudentDetailPage(self),
             "subjects": SubjectsPage(self), "assessments": AssessmentsPage(self), "entry": MarkEntryPage(self),
             "attendance": AttendancePage(self), "topics": TopicsPage(self), "results": ResultsPage(self),
-            "io": ImportExportPage(self), "settings": SettingsPage(self),
+            "io": ImportExportPage(self), "activity": ActivityPage(self), "settings": SettingsPage(self),
         }
         for p in self.pages.values():
             self.stack.addWidget(p)
+        self._fill_terms()
         self.current = "dashboard"
         self.nav.currentRowChanged.connect(self._nav_changed)
         self.nav.setCurrentRow(0)
+
+    # ---------------- terms ----------------
+    def _fill_terms(self) -> None:
+        items = [(t.label, t.id) for t in T.list_terms()] + [("All terms", None)]
+        fill_combo(self.term_box, items, self.term_id)
+        if self.term_box.currentIndex() < 0:
+            self.term_box.setCurrentIndex(0)
+
+    def _term_changed(self) -> None:
+        chosen = self.term_box.currentData()
+        if chosen == self.term_id:
+            return
+        if not self._leave_ok():
+            self._fill_terms()
+            return
+        self.term_id = chosen
+        if chosen:
+            T.set_current(chosen)                 # the app opens on this term next time
+        self.reload()
 
     # ---------------- navigation ----------------
     def _nav_changed(self, row: int) -> None:
@@ -121,7 +156,8 @@ class MainWindow(QMainWindow):
     # ---------------- shared state ----------------
     def reload(self) -> None:
         """Re-read the database after a change and redraw the current page."""
-        self.gb = Gradebook.load()
+        self.gb = Gradebook.load(self.term_id)
+        self._fill_terms()
         self.pages[self.current].refresh()
 
     def closeEvent(self, event):

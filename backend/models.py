@@ -24,6 +24,20 @@ class Setting(Base):
     value: Mapped[Any] = mapped_column(JSONType, nullable=True)
 
 
+class Term(Base):
+    """A teaching period with its own results. Length is up to the school: two six-month terms,
+    three shorter ones, or anything else. Several terms make an academic year."""
+    __tablename__ = "terms"
+    __table_args__ = (UniqueConstraint("name", "year"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(60))                 # "Term 1"
+    year: Mapped[str] = mapped_column(String(20))                 # "2026" or "2026/2027"
+    starts_on: Mapped[dt.date] = mapped_column(Date)
+    ends_on: Mapped[dt.date] = mapped_column(Date)
+    weight: Mapped[float] = mapped_column(Score, default=1)        # share in the annual result
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class ClassGroup(Base):
     __tablename__ = "classes"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -33,6 +47,8 @@ class ClassGroup(Base):
     teacher: Mapped[str] = mapped_column(String(120), default="")
     scale: Mapped[Any] = mapped_column(JSONType, nullable=True)            # custom scale rows
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    year: Mapped[str] = mapped_column(String(20), default="")              # academic year this class is running in
+    rollover: Mapped[str] = mapped_column(String(10), default="promote")   # promote | continue | group
 
     students: Mapped[list["Student"]] = relationship(back_populates="class_group")
 
@@ -73,6 +89,7 @@ class Assessment(Base):
     max_marks: Mapped[float] = mapped_column(Score, default=100)
     topics: Mapped[Any] = mapped_column(JSONType, default=list)            # whole-test tags (non-paper)
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    term_id: Mapped[int | None] = mapped_column(ForeignKey("terms.id", ondelete="RESTRICT"), nullable=True, index=True)
 
     sections: Mapped[list["PaperSection"]] = relationship(cascade="all, delete-orphan", order_by="PaperSection.position")
     questions: Mapped[list["Question"]] = relationship(cascade="all, delete-orphan", order_by="Question.position")
@@ -107,6 +124,8 @@ class Mark(Base):
     assessment_id: Mapped[int] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), index=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
     score: Mapped[float] = mapped_column(Score)
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
 class QuestionMark(Base):
@@ -125,6 +144,7 @@ class AttendanceDay(Base):
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"))
     date: Mapped[dt.date] = mapped_column(Date)
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    term_id: Mapped[int | None] = mapped_column(ForeignKey("terms.id", ondelete="RESTRICT"), nullable=True, index=True)
     entries: Mapped[list["AttendanceEntry"]] = relationship(cascade="all, delete-orphan")
 
 
@@ -134,3 +154,20 @@ class AttendanceEntry(Base):
     day_id: Mapped[int] = mapped_column(ForeignKey("attendance_days.id", ondelete="CASCADE"), primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), primary_key=True)
     present: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AuditLog(Base):
+    """Who changed what, and when. Rows are never updated or deleted by the app, and hold no
+    foreign keys, so the history of a mark survives the student or assessment being removed."""
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[dt.datetime] = mapped_column(DateTime, index=True)
+    who: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(40), index=True)     # mark.changed, student.archived, …
+    entity: Mapped[str] = mapped_column(String(20))                 # mark, student, subject, assessment, database
+    entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    student_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    assessment_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    old_value: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    new_value: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, default="")

@@ -105,7 +105,7 @@ def _report_story(gb: Gradebook, student_id: int, history: bool, width: float) -
     rank, n = gb.position(stu)
     total, k = gb.total_marks(stu)
     cls = gb.classes.get(stu.class_id)
-    term = gb.settings.get("term") or ""
+    term = gb.term.label if gb.term else (gb.settings.get("term") or "")
     story: list = [_Label(stu.name)] + _header(gb, "STUDENT PROGRESS REPORT", "  —  ".join(x for x in [gb.class_name(stu.class_id), term] if x))
     pos = f"{rank} out of {n}" if rank else "–"
     avg_txt = "–" if sm.overall is None else f"{sm.overall:.1f}%  (grade {sc.letter(sm.overall)})"
@@ -204,7 +204,7 @@ def class_order(gb: Gradebook, class_id: int) -> list[int]:
 def results_sheet(gb: Gradebook, class_id: int, path: str | Path) -> Path:
     doc = _doc(path, landscape(A4))
     sc, rank, subs = gb.scale(class_id), gb.ranking(class_id), gb.class_subjects(class_id)
-    story: list = [_Label(gb.class_name(class_id))] + _header(gb, "CLASS RESULTS", "  —  ".join(x for x in [gb.class_name(class_id), gb.settings.get("term") or "", sc.label] if x))
+    story: list = [_Label(gb.class_name(class_id))] + _header(gb, "CLASS RESULTS", "  —  ".join(x for x in [gb.class_name(class_id), gb.term.label if gb.term else "", sc.label] if x))
     if sc.div:
         cnt = [sum(1 for r in rank if r.summary.div and r.summary.div.complete and r.summary.div.div == d) for d in DIVISIONS]
         inc = sum(1 for r in rank if not (r.summary.div and r.summary.div.complete))

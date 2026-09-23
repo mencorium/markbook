@@ -74,7 +74,7 @@ class DashboardPage(Page):
         fill_combo(self.cls, self.app.class_items(), cid)
         sc, rank = gb.scale(cid), gb.ranking(cid)
         self.title.setText(gb.settings.get("school") or "Class overview")
-        self.subtitle.setText(f"{gb.class_name(cid)} · {sc.label}" + (f" · {gb.settings['term']}" if gb.settings.get("term") else ""))
+        self.subtitle.setText(f"{gb.class_name(cid)} · {sc.label} · {gb.term_label}")
         overall = [r.summary.overall for r in rank]
         ca = avg(overall)
         passing = [p for p in overall if sc.passing(p)]

@@ -11,6 +11,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from .. import audit
+from ..db import session_scope
 from ..phone import normalize_phone
 from . import assessments as A
 from . import records as R
@@ -223,4 +225,7 @@ def commit(p: ImportPreview, gb: Gradebook, add_new: bool = True, subject_id: in
     else:
         totals = {sid: r.mark for sid, r in zip(ids, p.rows) if sid is not None and not r.bad and r.mark is not None and 0 <= r.mark <= a.max_marks}
         n = A.save_totals(a.id, totals)
+    with session_scope() as s:
+        audit.log(s, "marks.imported", entity="assessment", entity_id=a.id, assessment_id=a.id,
+                  detail=f"{p.file_name}: {n} mark(s), {added} new student(s) into {a.name}")
     return {"added": added, "marks": n, "assessment_id": a.id}

@@ -7,15 +7,17 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox, QFileDialog, QFormLayout, QLineEdit, QPushButton,
                              QSpinBox, QWidget)
 
-from backend import log, migrate, seed
+from backend import audit, log, migrate, seed
 from backend.config import get_config
 from backend.grading import LEVEL_LABELS, PRESETS
 from backend.services import backup as BK
 from backend.services import records as R
+from backend.services import terms as T
 
+import datetime as dt
 from pathlib import Path
 
-from ..dialogs import ClassDialog, ScaleDialog
+from ..dialogs import ClassDialog, ScaleDialog, StartTermDialog, TermDialog
 from ..widgets import Page, Table, confirm, error, fill_combo, info, label, panel, row, safe
 
 
@@ -25,24 +27,41 @@ class SettingsPage(Page):
         # ---- school ----
         w = QWidget()
         f = QFormLayout(w)
-        self.school, self.term, self.head = QLineEdit(), QLineEdit(), QLineEdit()
+        self.school, self.head = QLineEdit(), QLineEdit()
         self.school.setPlaceholderText("e.g. Mbeya Secondary School")
-        self.term.setPlaceholderText("e.g. Term 1, 2026")
         self.next_term = QDateEdit()
         self.next_term.setCalendarPopup(True)
         self.next_term.setSpecialValueText("not set")
         self.next_term.setMinimumDate(QDate(2000, 1, 1))
+        self.who = QLineEdit()
         self.ca = QSpinBox()
         self.ca.setRange(0, 100)
         self.ca.setSuffix("%")
-        for lab, x in [("School name", self.school), ("Term", self.term), ("Head teacher", self.head), ("Next term begins", self.next_term),
-                       ("Tests count for", self.ca)]:
+        for lab, x in [("School name", self.school), ("Head teacher", self.head), ("Next term begins", self.next_term),
+                       ("Tests count for", self.ca), ("Changes recorded as", self.who)]:
             f.addRow(lab, x)
-        f.addRow("", label("Final mark = tests share + exam share. With no exam yet, the final mark is the test average.", "muted", wrap=True))
+        f.addRow("", label("Final mark = tests share + exam share. With no exam yet, the final mark is the test average. "
+                           "The name is written against every change on the Activity page.", "muted", wrap=True))
         save = QPushButton("Save settings")
         save.setObjectName("primary")
         save.clicked.connect(lambda _=False: self.save_settings())
         self.body.addWidget(panel(w, row(save, None), title="School & report cards"))
+        # ---- terms ----
+        self.terms = Table(["Term", "Year", "Starts", "Ends", "Weight", "Assessments", "Registers"], stretch=0)
+        self.terms.doubleClicked.connect(lambda: self.edit_term())
+        add_t, edit_t, del_t = QPushButton("Add term"), QPushButton("Edit"), QPushButton("Delete")
+        start_t = QPushButton("Start the next term…")
+        start_t.setObjectName("primary")
+        del_t.setObjectName("danger")
+        for b, fn in [(add_t, self.add_term), (edit_t, self.edit_term), (del_t, self.delete_term), (start_t, self.start_term)]:
+            b.clicked.connect(lambda _=False, f=fn: f())
+        self.terms_note = label("", "notice", wrap=True)
+        self.body.addWidget(panel(self.terms_note, self.terms, row(add_t, edit_t, del_t, None, start_t),
+                                  label("Each term has its own averages, positions and divisions. Marks land in the term their date falls in. "
+                                        "Weight decides how much a term counts towards the annual result. "
+                                        "Starting the next term also moves each class on according to its rule.", "muted", wrap=True),
+                                  title="Terms & academic years", stretch_end=True))
+
         # ---- classes ----
         self.cls = QComboBox()
         self.cls.currentIndexChanged.connect(lambda _: self._load_class())
@@ -57,10 +76,14 @@ class SettingsPage(Page):
         self.c_pass = QDoubleSpinBox()
         self.c_pass.setRange(0, 100)
         self.c_pass.setSuffix("%")
+        self.c_rollover = QComboBox()
+        for key, text in T.ROLLOVER.items():
+            self.c_rollover.addItem(text, key)
         self.b_scale = QPushButton("Edit custom grade scale…")
         self.b_scale.clicked.connect(lambda _=False: self.edit_scale())
         self.scale_view = Table(["Grade", "From", "Points"])
-        for lab, x in [("Class", row(self.cls, self.b_new, None)), ("Class name", self.c_name), ("Class teacher", self.c_teacher), ("Grading", self.c_level), ("Pass mark", self.c_pass)]:
+        for lab, x in [("Class", row(self.cls, self.b_new, None)), ("Class name", self.c_name), ("Class teacher", self.c_teacher),
+                       ("Grading", self.c_level), ("Pass mark", self.c_pass), ("At the end of the year", self.c_rollover)]:
             cf.addRow(lab, x)
         cf.addRow("", self.b_scale)
         csave, cdel = QPushButton("Save class"), QPushButton("Delete class")
@@ -108,6 +131,86 @@ class SettingsPage(Page):
         self.log_label = label("", "muted", wrap=True)
         self.body.addWidget(panel(self.db_label, row(add, rem, None), self.log_label, row(logs, None), title="Data & logs"))
         self.body.addStretch(1)
+
+    # ---------------- terms ----------------
+    def _load_terms(self):
+        rows, ids = [], []
+        for t in T.list_terms():
+            a, d = T.counts(t.id)
+            rows.append([t.name, t.year, f"{t.starts_on:%d %b %Y}", f"{t.ends_on:%d %b %Y}", f"{t.weight:g}", a, d])
+            ids.append(t.id)
+        self.terms.set_rows(rows, ids, center_from=1, fit_height=True)
+        current = self.app.gb.term
+        self.terms_note.setObjectName("noticeDone" if current else "note")
+        self.terms_note.setStyleSheet("")
+        self.terms_note.setText(f"Working in {current.label} ({current.starts_on:%d %b %Y} – {current.ends_on:%d %b %Y}). "
+                                "Switch term at the top left." if current else
+                                "No term is set up yet. Add one so each term's results stay separate.")
+
+    @safe
+    def add_term(self):
+        last = T.list_terms()
+        suggestion = {}
+        if last:
+            prev = last[-1]
+            span = (prev.ends_on - prev.starts_on).days or 180
+            starts = prev.ends_on + dt.timedelta(days=1)
+            suggestion = {"name": T.next_class_name(prev.name), "year": prev.year, "starts": starts,
+                          "ends": starts + dt.timedelta(days=span)}
+        d = TermDialog(self, suggestion=suggestion)
+        if d.exec():
+            term = T.save_term(None, **d.values())
+            if len(T.list_terms()) == 1:
+                T.set_current(term.id)
+                self.app.term_id = term.id
+            self.app.reload()
+
+    @safe
+    def edit_term(self):
+        tid = self.terms.current_id()
+        if tid is None:
+            return error(self, "Select a term first.")
+        d = TermDialog(self, T.get_term(tid))
+        if d.exec():
+            T.save_term(tid, **d.values())
+            self.app.reload()
+
+    @safe
+    def delete_term(self):
+        tid = self.terms.current_id()
+        if tid is None:
+            return error(self, "Select a term first.")
+        term = T.get_term(tid)
+        if confirm(self, f"Delete {term.label}? It must have no assessments or registers in it."):
+            T.delete_term(tid)
+            if self.app.term_id == tid:
+                self.app.term_id = None
+            self.app.reload()
+
+    @safe
+    def start_term(self):
+        classes = sorted(self.app.gb.classes.values(), key=lambda c: c.name.lower())
+        last = T.list_terms()
+        suggestion = {}
+        if last:
+            prev = last[-1]
+            span = (prev.ends_on - prev.starts_on).days or 180
+            starts = prev.ends_on + dt.timedelta(days=1)
+            year = str(int(prev.year[:4]) + 1) if starts.year > prev.ends_on.year else prev.year
+            suggestion = {"name": "Term 1" if year != prev.year else T.next_class_name(prev.name), "year": year,
+                          "starts": starts, "ends": starts + dt.timedelta(days=span)}
+        d = StartTermDialog(self, classes, suggestion)
+        if not d.exec():
+            return
+        res = T.start_term(**d.values(), plan=d.plan())
+        self.app.term_id = res["term"].id
+        self.app.class_id = None
+        self.app.reload()
+        info(self, f"{res['term'].label} started."
+                   + (f" {res['moved']} student(s) promoted." if res["moved"] else "")
+                   + (f" {res['continued']} class(es) carried on." if res["continued"] else "")
+                   + (f" {res['archived']} student(s) archived as their course finished." if res["archived"] else "")
+                   + "\n\nLast term's marks stay where they are — switch term at the top left to see them.")
 
     # ---------------- backups ----------------
     def _folder(self):
@@ -188,6 +291,7 @@ class SettingsPage(Page):
             return
         BK.backup(self._folder(), "before-restore")          # safety net for the restore itself
         BK.restore(path)
+        audit.record("database.restored", entity="database", detail=Path(path).name)
         self.app.class_id = None
         self.app.reload()
         info(self, "Backup restored. A copy of the previous data was saved first, labelled 'before-restore'.")
@@ -195,12 +299,14 @@ class SettingsPage(Page):
     def refresh(self):
         s = self.app.gb.settings
         self.school.setText(s.get("school", ""))
-        self.term.setText(s.get("term", ""))
         self.head.setText(s.get("head_teacher", ""))
         nt = QDate.fromString(s.get("next_term") or "", "yyyy-MM-dd")
         self.next_term.setDate(nt if nt.isValid() else self.next_term.minimumDate())
         self.ca.setValue(int(s.get("ca_weight", 40)))
+        self.who.setText(s.get("user_name") or "")
+        self.who.setPlaceholderText(audit.machine_user())
         fill_combo(self.cls, self.app.class_items(), self.app.ensure_class())
+        self._load_terms()
         self._load_class()
         url = get_config().database_url
         self.db_label.setText(f"Data is stored in PostgreSQL at {url.rsplit('@', 1)[-1]} (schema revision {migrate.current_revision() or 'unknown'}). "
@@ -210,7 +316,7 @@ class SettingsPage(Page):
 
     def _load_class(self):
         c = self.app.gb.classes.get(self.cls.currentData())
-        for wdg in (self.c_name, self.c_teacher, self.c_level, self.c_pass):
+        for wdg in (self.c_name, self.c_teacher, self.c_level, self.c_pass, self.c_rollover):
             wdg.setEnabled(c is not None)
         if not c:
             return
@@ -219,6 +325,7 @@ class SettingsPage(Page):
         self.custom_rows = c.scale
         fill_combo(self.c_level, [(v, k) for k, v in LEVEL_LABELS.items()], c.level)
         self.c_pass.setValue(c.pass_mark if c.pass_mark is not None else self._default_pass(c.level))
+        self.c_rollover.setCurrentIndex(max(0, self.c_rollover.findData(c.rollover or "promote")))
         self._show_scale()
 
     def _default_pass(self, level):
@@ -245,8 +352,9 @@ class SettingsPage(Page):
     @safe
     def save_settings(self):
         nt = self.next_term.date()
-        R.save_settings({"school": self.school.text().strip(), "term": self.term.text().strip(), "head_teacher": self.head.text().strip(),
-                         "next_term": "" if nt == self.next_term.minimumDate() else nt.toString("yyyy-MM-dd"), "ca_weight": self.ca.value()})
+        R.save_settings({"school": self.school.text().strip(), "head_teacher": self.head.text().strip(),
+                         "next_term": "" if nt == self.next_term.minimumDate() else nt.toString("yyyy-MM-dd"), "ca_weight": self.ca.value(),
+                         "user_name": self.who.text().strip()})
         self.app.reload()
         info(self, "Settings saved.")
 
@@ -256,7 +364,8 @@ class SettingsPage(Page):
         if d.exec():
             v = d.values()
             cls = R.get_or_create_class(v["name"])
-            R.save_class(cls.id, name=v["name"], level=v["level"], pass_mark=v["pass_mark"], teacher=v["teacher"], scale=None)
+            R.save_class(cls.id, name=v["name"], level=v["level"], pass_mark=v["pass_mark"], teacher=v["teacher"], scale=None,
+                         rollover=v.get("rollover"))
             self.app.class_id = cls.id
             self.app.reload()
             info(self, f"Class {v['name']} added. Add students to it from the Students page.")
@@ -268,7 +377,7 @@ class SettingsPage(Page):
             return
         lvl = self.c_level.currentData()
         R.save_class(cid, name=self.c_name.text(), level=lvl, pass_mark=self.c_pass.value(), teacher=self.c_teacher.text(),
-                     scale=self.custom_rows if lvl == "custom" else None)
+                     scale=self.custom_rows if lvl == "custom" else None, rollover=self.c_rollover.currentData())
         self.app.reload()
         info(self, "Class saved.")
 

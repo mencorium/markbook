@@ -71,7 +71,8 @@ class StudentsPage(Page):
         if d.exec():
             v = d.values()
             cls = R.get_or_create_class(v["name"])
-            R.save_class(cls.id, name=v["name"], level=v["level"], pass_mark=v["pass_mark"], teacher=v["teacher"], scale=None)
+            R.save_class(cls.id, name=v["name"], level=v["level"], pass_mark=v["pass_mark"], teacher=v["teacher"], scale=None,
+                         rollover=v.get("rollover"))
             self.app.class_id = cls.id
             self.app.reload()
 

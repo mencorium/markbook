@@ -45,8 +45,10 @@ def reg_of(reg: str | None, null_reg: bool) -> str:
 
 
 def _meta(gb: Gradebook, class_id: int, *lines: str) -> list[str]:
+    """The Class line must stay exactly the class name: these sheets import back into the app."""
     school = (gb.settings.get("school") or "").strip()
-    return ([school.upper()] if school else []) + [f"Class: {gb.class_name(class_id)}", *lines]
+    term = [f"Term: {gb.term.label}"] if gb.term else []
+    return ([school.upper()] if school else []) + [f"Class: {gb.class_name(class_id)}", *term, *lines]
 
 
 # ---------------- builders ----------------

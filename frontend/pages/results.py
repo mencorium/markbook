@@ -57,7 +57,7 @@ class ResultsPage(Page):
             self.subtitle.setText("Add students and record marks first.")
             return
         sc, rank, subs = gb.scale(cid), gb.ranking(cid), gb.class_subjects(cid)
-        self.subtitle.setText(f"{gb.class_name(cid)} · {sc.label}" + (f" · division from {sc.best_note}" if sc.div else ""))
+        self.subtitle.setText(f"{gb.class_name(cid)} · {gb.term_label} · {sc.label}" + (f" · division from {sc.best_note}" if sc.div else ""))
         inc = sum(1 for r in rank if not (r.summary.div and r.summary.div.complete))
         if sc.div:
             self.strip.set([(str(sum(1 for r in rank if r.summary.div and r.summary.div.complete and r.summary.div.div == d)), f"Division {d}") for d in DIVISIONS]

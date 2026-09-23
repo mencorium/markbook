@@ -33,6 +33,10 @@ def main() -> int:
                                                f"Details were written to {log.log_path()}")
         return 1
     drafts.prune()
+    from backend.services.terms import assign_missing
+    moved = assign_missing()
+    if moved:
+        logger.info("placed %d assessment(s)/register(s) into a term", moved)
     if "--sample" in sys.argv:
         seed.add_sample()
     from frontend.main_window import MainWindow

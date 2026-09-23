@@ -31,6 +31,8 @@ def add_sample(seed: int | None = None) -> None:
     rnd = random.Random(seed)
     create_schema()
     yr = dt.date.today().year
+    from .services.terms import assign_missing, current_term, save_term
+    term = current_term() or save_term(None, name="Term 1", year=str(yr), starts_on=dt.date(yr, 1, 1), ends_on=dt.date(yr, 6, 30))
     with session_scope() as s:
         if s.scalar(select(ClassGroup).where(ClassGroup.name == SAMPLE_CLASS)):
             return
@@ -59,7 +61,8 @@ def add_sample(seed: int | None = None) -> None:
             stu_topic = [{t: (rnd.random() - .5) * 24 for t in topics} for _ in studs]
             for k, (an, typ, (m, d), mx) in enumerate(plan):
                 base = lambda i: ability[i] + off + drift[i] * k + (presence[i] - .85) * 40
-                a = Assessment(subject_id=sub.id, class_id=cls.id, type=typ, name=an, date=dt.date(yr, m, d), max_marks=mx, topics=[], is_sample=True)
+                a = Assessment(subject_id=sub.id, class_id=cls.id, type=typ, name=an, date=dt.date(yr, m, d), max_marks=mx, topics=[],
+                               is_sample=True, term_id=term.id)
                 s.add(a)
                 s.flush()
                 if typ == "Exam":
@@ -101,7 +104,7 @@ def add_sample(seed: int | None = None) -> None:
                         s.add(Mark(assessment_id=a.id, student_id=st.id, score=round(p / 100 * mx)))
         start = dt.date(yr, 1, 13)
         for w in range(20):
-            day = AttendanceDay(class_id=cls.id, date=start + dt.timedelta(days=7 * w), is_sample=True)
+            day = AttendanceDay(class_id=cls.id, date=start + dt.timedelta(days=7 * w), is_sample=True, term_id=term.id)
             s.add(day)
             s.flush()
             for i, st in enumerate(studs):
@@ -109,6 +112,8 @@ def add_sample(seed: int | None = None) -> None:
         math = s.scalar(select(Subject).where(Subject.code == "MATH"))
         for st in studs[:4]:
             st.targets = {str(math.id): "A"}
+        cls.year = str(yr)
+    assign_missing()            # sample dates can fall outside the chosen term
 
 
 def remove_sample() -> None:
