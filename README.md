@@ -128,11 +128,50 @@ pytest -q                          # uses markbook_test (override with TEST_DATA
 
 The tests cover grading, divisions, choice-section totals, phone normalisation, the full flow (sample data → analytics → Excel export → import round trip → comments → three PDFs), paper editing, moving a student between classes, attendance, and an offscreen run through every screen.
 
+## Building a Windows program (.exe and installer)
+
+Your own icon goes at `assets/markbook.ico` — replace the one there. It becomes the window,
+taskbar and installer icon. (A `.png` of the same name also works for the window icon.)
+
+On a Windows machine with Python installed:
+
+```bat
+build_windows.bat
+```
+
+That creates the virtual environment, installs everything, and produces:
+
+- `dist\Markbook\markbook.exe` — the program folder, runnable as it is
+- `dist\installer\MarkbookSetup-1.0.0.exe` — the installer, if
+  [Inno Setup](https://jrsoftware.org/isdl.php) is installed
+
+To run the steps by hand:
+
+```bat
+pip install -r requirements.txt pyinstaller
+pyinstaller markbook.spec --noconfirm
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\markbook.iss
+```
+
+The build carries its own migrations and `alembic.ini`, so an installed copy creates and upgrades
+its database on its own. Version and publisher are set at the top of `installer/markbook.iss`.
+
+**PostgreSQL is still needed** on the machine that holds the data — it is not bundled. On first
+start, if Markbook cannot reach a database it asks for the server, database, user and password,
+tests the connection and writes `.env` next to `markbook.exe`. To point an installed copy somewhere
+else later, edit that file.
+
+Files a person creates (backups, logs, drafts in `~/.markbook`) are never touched by the uninstaller.
+
 ## Project structure
 
 ```
 markbook_desktop/
 ├── main.py                    Entry point
+├── markbook.spec              PyInstaller build
+├── build_windows.bat          One-step Windows build
+├── installer/markbook.iss     Inno Setup installer
+├── assets/markbook.ico        Application icon
 ├── alembic.ini, migrations/   Schema versions (Alembic)
 ├── backend/                   No Qt imports: can sit behind a REST API later
 │   ├── config.py              .env settings (DATABASE_URL, DEFAULT_COUNTRY_CODE)
@@ -140,7 +179,7 @@ markbook_desktop/
 │   ├── migrate.py             Runs pending migrations at startup
 │   ├── log.py                 Rotating log file
 │   ├── audit.py               Change history (who changed what, and when)
-│   ├── paths.py               Where logs, drafts and backups are kept
+│   ├── paths.py               Where logs, drafts, backups and bundled files live
 │   ├── models.py              SQLAlchemy tables
 │   ├── schemas.py             Plain dataclasses handed to the UI
 │   ├── grading.py             NECTA presets, custom scales, points, divisions, remarks
@@ -164,6 +203,7 @@ markbook_desktop/
 │   ├── main_window.py         Sidebar, page stack, shared state
 │   ├── theme.py               Colours and Qt stylesheet
 │   ├── widgets.py             Page scaffold, tables, chart canvas, helpers
+│   ├── db_setup.py            First-run database connection dialog
 │   ├── dialogs.py             Student (with phone), subject, assessment, scale dialogs
 │   └── pages/                 One module per screen
 └── tests/

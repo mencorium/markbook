@@ -10,8 +10,6 @@ done and the next start carries on from there.
 from __future__ import annotations
 
 import time
-from pathlib import Path
-
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
@@ -23,8 +21,9 @@ from sqlalchemy.exc import OperationalError
 from .db import engine
 from .log import get
 from .models import Base
+from .paths import resource_dir
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = resource_dir()          # the project root, or the unpacked bundle in a build
 BASELINE = "0001_initial"
 LOCK_TIMEOUT = "15s"          # rather fail with a message than hang on a lock another session holds
 log = get("migrate")

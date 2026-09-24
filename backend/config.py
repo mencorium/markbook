@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
-
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / ".env")
+from .paths import PROJECT_ROOT, install_dir
+
+# An installed copy keeps its .env beside markbook.exe; the source tree keeps it in the project.
+for candidate in (install_dir() / ".env", PROJECT_ROOT / ".env"):
+    if candidate.exists():
+        load_dotenv(candidate)
+        break
 
 
 @dataclass(frozen=True)
