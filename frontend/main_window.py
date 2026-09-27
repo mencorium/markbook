@@ -40,8 +40,9 @@ NAV = [("dashboard", "Overview"), ("students", "Students"), ("subjects", "Subjec
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, splash=None):
         super().__init__()
+        self._splash = splash
         self.setWindowTitle("Markbook — student progress")
         self.resize(1320, 860)
         self.gb: Gradebook = Gradebook.load()
@@ -95,12 +96,14 @@ class MainWindow(QMainWindow):
         h.addWidget(self.stack, 1)
         self.setCentralWidget(root)
 
+        self._say("Building the screens…", 80)
         self.pages = {
             "dashboard": DashboardPage(self), "students": StudentsPage(self), "student": StudentDetailPage(self),
             "subjects": SubjectsPage(self), "subject": SubjectDetailPage(self), "assessments": AssessmentsPage(self), "entry": MarkEntryPage(self),
             "timetable": TimetablePage(self), "attendance": AttendancePage(self), "topics": TopicsPage(self), "results": ResultsPage(self),
             "io": ImportExportPage(self), "activity": ActivityPage(self), "settings": SettingsPage(self),
         }
+        self._say("Almost there…", 92)
         for p in self.pages.values():
             self.stack.addWidget(p)
         self._fill_terms()
@@ -113,6 +116,11 @@ class MainWindow(QMainWindow):
         self.current = "dashboard"
         self.nav.currentRowChanged.connect(self._nav_changed)
         self.nav.setCurrentRow(0)
+
+    def _say(self, what: str, percent: int) -> None:
+        """Report progress while starting, if a splash is showing."""
+        if self._splash is not None:
+            self._splash.step(what, percent)
 
     # ---------------- terms ----------------
     def _fill_terms(self) -> None:

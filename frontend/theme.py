@@ -53,6 +53,13 @@ QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{ background: {SURFACE}; border: 1px solid {RULE}; padding: 7px 16px; margin-right: 4px; border-radius: 7px; }}
 QTabBar::tab:selected {{ background: {INK}; color: white; }}
 QScrollArea {{ border: none; background: transparent; }}
+#splash {{ background: transparent; }}
+#splashCard {{ background: {SURFACE}; border: 1px solid {RULE}; border-radius: 4px; }}
+#splashTitle {{ font-size: 26pt; font-weight: 800; color: {INK}; padding-top: 2px; }}
+#splashWhat {{ color: {MUTED}; font-size: 10pt; }}
+#splashTip {{ color: {MUTED}; font-size: 9.5pt; font-style: italic; }}
+#splash QProgressBar {{ background: {GRID}; border: none; border-radius: 3px; }}
+#splash QProgressBar::chunk {{ background: {PEN}; border-radius: 3px; }}
 QDialog, QMessageBox, QInputDialog, QFileDialog, QColorDialog {{ background: {SURFACE}; }}
 QDialog QLabel, QMessageBox QLabel, QGroupBox {{ background: transparent; color: {INK}; }}
 QDialogButtonBox QPushButton {{ min-width: 92px; }}

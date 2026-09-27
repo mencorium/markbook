@@ -65,6 +65,12 @@ read per subject as well as overall — the subject page shows both it and how m
 gets each week. Registers taken before a lesson is removed, or before this feature existed, stay
 valid.
 
+**Starting up.** Markbook shows a splash with the app icon, its name, what it is doing
+("Opening the database…", "Reading this term's marks…") and a progress bar, plus a one-line tip
+that changes every few seconds — the tips are in `frontend/splash.py` if you want to edit them.
+It stays up for at least a moment even on a fast start, and steps aside if the database
+connection dialog is needed.
+
 **Moving around.** Detail pages have a back button naming where you came from ("← Computer
 Science"), and **Alt+Left** does the same. Opening an exam from a subject returns to that subject;
 opening the same exam from Tests & exams returns there. If the record you came from has since been
@@ -137,6 +143,11 @@ shown in Settings). Send that file along when reporting a bug.
 pending migration on start, so upgrading Markbook never means rebuilding your data by hand. A
 database created before migrations existed is stamped at the baseline and then upgraded, keeping
 its data.
+
+If Markbook ever reports that it could not read its migrations, delete any `__pycache__` folder
+inside `migrations/` and start again — a half-written `.pyc` (an interrupted run, or files copied
+between machines) makes Alembic load an empty module. The app now clears that cache and retries by
+itself, and says so in the log.
 
 ```bash
 alembic upgrade head                        # apply migrations manually
@@ -233,6 +244,7 @@ markbook_desktop/
 │   ├── widgets.py             Page scaffold, tables, chart canvas, helpers
 │   ├── db_setup.py            First-run database connection dialog
 │   ├── quick_find.py          Ctrl+K student search
+│   ├── splash.py              Start-up window: progress and rotating tips
 │   ├── dialogs.py             Student (with phone), subject, assessment, scale dialogs
 │   └── pages/                 One module per screen
 └── tests/
