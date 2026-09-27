@@ -11,6 +11,12 @@ PAPER, SURFACE, INK, MUTED, RULE, GRID = "#F6F8FA", "#FFFFFF", "#16263D", "#5665
 PEN, GREEN, AMBER, BLUE = "#C8322B", "#2E7D4F", "#A8691A", "#2458A6"
 HEAT_LOW, HEAT_MID, HEAT_HIGH = "#F4D3D1", "#F3E3C8", "#D3EBDD"
 
+def q(colour: str):
+    """Hex string -> QColor, so pages can use the palette without importing QtGui."""
+    from PyQt6.QtGui import QColor
+    return QColor(colour)
+
+
 QSS = f"""
 QWidget {{ font-family: 'Segoe UI', 'Noto Sans', 'Helvetica Neue', Arial; font-size: 10.5pt; color: {INK}; }}
 QMainWindow, #page {{ background: {PAPER}; }}

@@ -48,6 +48,33 @@ and term, and a finished course archives its students.
 Upgrading an existing database puts everything already recorded into one term named after your old
 Term setting, so nothing is lost.
 
+**One subject at a time.** Double-click a subject (or select it and press Open results) to see, for
+the chosen class and term: every test and exam in that subject with its mean, highest, lowest and
+pass rate; the class average across them; the spread of final grades; and a cumulative table with a
+column per assessment, then tests %, exams %, final %, grade, position and trend for each student.
+Double-click an assessment to enter marks, or a student to open their profile. Export takes the
+same table to Excel.
+
+**Timetable and attendance.** Set each class's weekly lessons under **Timetable** — subject, day,
+start and end time, room. A timetable belongs to a term and can be copied into the next one.
+Attendance is then taken against those lessons: pick a date, the day's sessions are listed with
+whether each register has been taken, and you mark one session at a time. A day with no lessons
+says so rather than letting you record a register that belongs to nothing, and a whole-day register
+is still available as a deliberate choice. Because registers carry their subject, attendance can be
+read per subject as well as overall — the subject page shows both it and how much time that subject
+gets each week. Registers taken before a lesson is removed, or before this feature existed, stay
+valid.
+
+**Moving around.** Detail pages have a back button naming where you came from ("← Computer
+Science"), and **Alt+Left** does the same. Opening an exam from a subject returns to that subject;
+opening the same exam from Tests & exams returns there. If the record you came from has since been
+deleted, back skips past it.
+
+**Finding a student.** Press **Ctrl+K** (or the Find a student button) from anywhere, type part of a
+name, reg. number or phone, and press Enter. Words can come in any order and be shortened —
+"mwa nee" finds Neema Mwakalinga — and a phone can be typed as dialled (0793…) even though it is
+stored as +255793…. Archived students appear last, marked as archived.
+
 **Annual results.** Results & reports → **Show: Whole year** combines every term of the academic
 year into a year mark per subject, weighted by each term's weight, then the year average, division
 and position. Terms a student did not sit are simply left out of their own average. From there:
@@ -191,6 +218,7 @@ markbook_desktop/
 │       ├── assessments.py     Assessments, question papers, marks
 │       ├── attendance.py      Daily registers
 │       ├── terms.py           Terms, academic years and class rollover
+│       ├── timetable.py       Weekly lessons that attendance is taken against
 │       ├── analytics.py       Gradebook: every calculation (results, ranking, predictions, topic/question analysis)
 │       ├── comments.py        Suggested class-teacher comments from real results
 │       ├── exports.py         Excel (styled) and CSV sheets
@@ -204,6 +232,7 @@ markbook_desktop/
 │   ├── theme.py               Colours and Qt stylesheet
 │   ├── widgets.py             Page scaffold, tables, chart canvas, helpers
 │   ├── db_setup.py            First-run database connection dialog
+│   ├── quick_find.py          Ctrl+K student search
 │   ├── dialogs.py             Student (with phone), subject, assessment, scale dialogs
 │   └── pages/                 One module per screen
 └── tests/

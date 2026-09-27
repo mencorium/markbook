@@ -185,7 +185,7 @@ class Gradebook:
                 if aid in keep:
                     qmarks.setdefault(aid, {}).setdefault(qm.student_id, {})[qm.question_id] = float(qm.score)
             days = [AttendanceDayInfo(d.id, d.class_id, d.date, [e.student_id for e in d.entries],
-                                      [e.student_id for e in d.entries if not e.present], d.term_id)
+                                      [e.student_id for e in d.entries if not e.present], d.term_id, d.slot_id, d.subject_id)
                     for d in s.scalars(select(AttendanceDay).where(AttendanceDay.term_id == term.id) if term else select(AttendanceDay))]
         return cls(get_settings(), classes, subjects, students, assessments, totals, qmarks, days, term)
 
@@ -336,19 +336,22 @@ class Gradebook:
         return self._m(("ast", a.id), build)
 
     # ---------------- attendance ----------------
-    def att_rate(self, stu: StudentInfo, after=None, upto=None) -> float | None:
+    def att_rate(self, stu: StudentInfo, after=None, upto=None, subject_id: int | None = None) -> float | None:
+        """Across every register, or only the sessions of one subject."""
         exp = pres = 0
         for d in self.days:
             if stu.id not in d.roster or (after and d.date <= after) or (upto and d.date > upto):
+                continue
+            if subject_id and d.subject_id != subject_id:
                 continue
             exp += 1
             pres += stu.id not in d.absent
         return pres / exp * 100 if exp else None
 
-    def class_att(self, class_id: int) -> float | None:
+    def class_att(self, class_id: int, subject_id: int | None = None) -> float | None:
         exp = pres = 0
         for d in self.days:
-            if d.class_id != class_id:
+            if d.class_id != class_id or (subject_id and d.subject_id != subject_id):
                 continue
             r = [sid for sid in d.roster if sid in self.students]
             exp += len(r)

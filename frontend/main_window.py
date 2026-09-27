@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QStackedWidget, QVBoxLayout,
-                             QWidget)
+from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QPushButton, QStackedWidget,
+                             QVBoxLayout, QWidget)
 
 import datetime as dt
 
@@ -28,12 +29,14 @@ from .pages.results import ResultsPage
 from .pages.settings import SettingsPage
 from .pages.student_detail import StudentDetailPage
 from .pages.students import StudentsPage
+from .pages.subject_detail import SubjectDetailPage
 from .pages.subjects import SubjectsPage
+from .pages.timetable import TimetablePage
 from .pages.topics import TopicsPage
 from .widgets import fill_combo, label
 
 NAV = [("dashboard", "Overview"), ("students", "Students"), ("subjects", "Subjects"), ("assessments", "Tests & exams"),
-       ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("activity", "Activity"), ("settings", "Settings")]
+       ("timetable", "Timetable"), ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("activity", "Activity"), ("settings", "Settings")]
 
 
 class MainWindow(QMainWindow):
@@ -44,6 +47,7 @@ class MainWindow(QMainWindow):
         self.gb: Gradebook = Gradebook.load()
         self.term_id: int | None = self.gb.term.id if self.gb.term else None
         self.class_id: int | None = None
+        self.subject_id: int | None = None
         self.student_id: int | None = None
         self.assessment_id: int | None = None
 
@@ -74,6 +78,15 @@ class MainWindow(QMainWindow):
             it.setData(Qt.ItemDataRole.UserRole, key)
             self.nav.addItem(it)
         sv.addWidget(self.nav, 1)
+        find = QPushButton("🔍  Find a student")
+        find.setToolTip("Ctrl+K")
+        find.clicked.connect(lambda _=False: self.find_student())
+        holder = QWidget()
+        hv = QVBoxLayout(holder)
+        hv.setContentsMargins(12, 0, 12, 8)
+        hv.addWidget(find)
+        holder.setStyleSheet(f"background: {theme.SURFACE};")
+        sv.addWidget(holder)
         db = get_config().database_url.rsplit("@", 1)[-1]
         sv.addWidget(label(f"PostgreSQL · {db}", "storeNote", wrap=True))
         h.addWidget(side)
@@ -84,13 +97,19 @@ class MainWindow(QMainWindow):
 
         self.pages = {
             "dashboard": DashboardPage(self), "students": StudentsPage(self), "student": StudentDetailPage(self),
-            "subjects": SubjectsPage(self), "assessments": AssessmentsPage(self), "entry": MarkEntryPage(self),
-            "attendance": AttendancePage(self), "topics": TopicsPage(self), "results": ResultsPage(self),
+            "subjects": SubjectsPage(self), "subject": SubjectDetailPage(self), "assessments": AssessmentsPage(self), "entry": MarkEntryPage(self),
+            "timetable": TimetablePage(self), "attendance": AttendancePage(self), "topics": TopicsPage(self), "results": ResultsPage(self),
             "io": ImportExportPage(self), "activity": ActivityPage(self), "settings": SettingsPage(self),
         }
         for p in self.pages.values():
             self.stack.addWidget(p)
         self._fill_terms()
+        self.history: list[tuple[str, dict, str]] = []       # where "back" goes, newest last
+        for keys, fn in [(("Ctrl+K", "Ctrl+F"), self.find_student)]:
+            for key in keys:
+                QShortcut(QKeySequence(key), self, activated=fn)
+        # Alt+Left only: Backspace would be swallowed here while marks are being typed
+        QShortcut(QKeySequence("Alt+Left"), self, activated=self.go_back)
         self.current = "dashboard"
         self.nav.currentRowChanged.connect(self._nav_changed)
         self.nav.setCurrentRow(0)
@@ -127,13 +146,58 @@ class MainWindow(QMainWindow):
         self.show_page(key)
 
     def _nav_key(self, key: str) -> str:
-        return {"student": "students", "entry": "assessments"}.get(key, key)
+        return {"student": "students", "entry": "assessments", "subject": "subjects"}.get(key, key)
 
     def _leave_ok(self) -> bool:
         page = self.pages.get(self.current)
         return page.can_leave() if hasattr(page, "can_leave") else True
 
-    def show_page(self, key: str) -> None:
+    # ---------------- history ----------------
+    def _context(self) -> dict:
+        return {"class_id": self.class_id, "subject_id": self.subject_id, "student_id": self.student_id,
+                "assessment_id": self.assessment_id, "term_id": self.term_id}
+
+    def _remember(self) -> None:
+        """Record the page being left, with what it was showing, so back returns to exactly that."""
+        page = self.pages.get(self.current)
+        title = page.title.text() if page is not None else self.current
+        if self.history and self.history[-1][0] == self.current and self.history[-1][1] == self._context():
+            return
+        self.history.append((self.current, self._context(), title))
+        del self.history[:-30]
+
+    def back_target(self) -> str:
+        """The name shown on a back button: the page that would be returned to."""
+        return self.history[-1][2] if self.history else "Overview"
+
+    def _still_valid(self, key: str, ctx: dict) -> bool:
+        if key == "student":
+            return ctx["student_id"] in self.gb.students
+        if key == "entry":
+            return ctx["assessment_id"] in self.gb.by_id
+        if key == "subject":
+            return ctx["subject_id"] in self.gb.subjects
+        return True
+
+    def go_back(self) -> None:
+        if not self._leave_ok():
+            return
+        while self.history:
+            key, ctx, _ = self.history.pop()
+            if ctx["term_id"] != self.term_id:               # the page was viewed in another term
+                self.term_id = ctx["term_id"]
+                self.gb = Gradebook.load(self.term_id)
+                self._fill_terms()
+            self.class_id, self.subject_id = ctx["class_id"], ctx["subject_id"]
+            self.student_id, self.assessment_id = ctx["student_id"], ctx["assessment_id"]
+            if self._still_valid(key, ctx):                  # skip pages whose record has gone
+                self.show_page(key, remember=False)
+                return
+        self.show_page("dashboard", remember=False)
+
+    def show_page(self, key: str, remember: bool = True) -> None:
+        if remember and key != self.current:
+            self._remember()
         self.current = key
         self.nav.blockSignals(True)
         self.nav.setCurrentRow([k for k, _ in NAV].index(self._nav_key(key)))
@@ -146,6 +210,16 @@ class MainWindow(QMainWindow):
         if student_id is not None and self._leave_ok():
             self.student_id = student_id
             self.show_page("student")
+
+    def open_subject(self, subject_id: int) -> None:
+        if subject_id is not None and self._leave_ok():
+            self.subject_id = subject_id
+            self.show_page("subject")
+
+    def find_student(self) -> None:
+        """Ctrl+K from anywhere."""
+        from .quick_find import QuickFind
+        QuickFind(self).exec()
 
     def open_assessment(self, assessment_id: int, tab: str | None = None) -> None:
         if assessment_id is not None and self._leave_ok():

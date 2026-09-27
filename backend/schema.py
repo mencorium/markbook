@@ -107,6 +107,29 @@ class AssessmentInfo:
 
 
 @dataclass
+class SlotInfo:
+    """One weekly lesson in the timetable."""
+    id: int
+    class_id: int
+    subject_id: int
+    term_id: int | None
+    weekday: int                       # 0 = Monday
+    starts_at: dt.time
+    ends_at: dt.time
+    room: str = ""
+
+    @property
+    def time_label(self) -> str:
+        return f"{self.starts_at:%H:%M}–{self.ends_at:%H:%M}"
+
+    @property
+    def minutes(self) -> int:
+        a = dt.datetime.combine(dt.date.today(), self.starts_at)
+        b = dt.datetime.combine(dt.date.today(), self.ends_at)
+        return int((b - a).total_seconds() // 60)
+
+
+@dataclass
 class AttendanceDayInfo:
     id: int
     class_id: int
@@ -114,3 +137,5 @@ class AttendanceDayInfo:
     roster: list[int]
     absent: list[int]
     term_id: int | None = None
+    slot_id: int | None = None
+    subject_id: int | None = None

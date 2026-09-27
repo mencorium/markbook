@@ -35,9 +35,10 @@ class MarkEntryPage(Page):
         self.dirty = False
         self.paper_dirty = False
         self._loading = False
-        back = QPushButton("← Tests && exams")
-        back.clicked.connect(lambda _=False: app.show_page("assessments"))
-        self.body.insertLayout(0, row(back, stretch_end=True))
+        self.back = QPushButton("← Back")
+        self.back.setToolTip("Alt+Left")
+        self.back.clicked.connect(lambda _=False: app.go_back())
+        self.body.insertLayout(0, row(self.back, stretch_end=True))
         self.btn_pdf = QPushButton("Analysis report (PDF)")
         for text, fn, name, attr in [("Edit details", self.edit, None, None), ("Export Excel", lambda: self.export("xlsx"), None, None),
                                      ("Export CSV", lambda: self.export("csv"), None, None), (None, self.analysis_pdf, None, "btn_pdf"),
@@ -149,6 +150,7 @@ class MarkEntryPage(Page):
         a = self.a
         if not a:
             return
+        self.back.setText(f"← {self.app.back_target()}")
         gb = self.app.gb
         self.title.setText(a.name)
         self.subtitle.setText(f"{gb.subject_name(a.subject_id)} · {gb.class_name(a.class_id)} · {a.type} · {a.date:%d %b %Y} · out of {a.max_marks:g}"

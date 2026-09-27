@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, Time, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -137,14 +137,32 @@ class QuestionMark(Base):
     score: Mapped[float] = mapped_column(Score)
 
 
+class TimetableSlot(Base):
+    """A weekly lesson: this class has this subject at this time on this weekday, in this term.
+    Attendance is taken against these sessions, so every register belongs to a real lesson."""
+    __tablename__ = "timetable_slots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"), index=True)
+    subject_id: Mapped[int] = mapped_column(ForeignKey("subjects.id", ondelete="CASCADE"), index=True)
+    term_id: Mapped[int | None] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), nullable=True, index=True)
+    weekday: Mapped[int] = mapped_column(Integer)                 # 0 = Monday
+    starts_at: Mapped[dt.time] = mapped_column(Time)
+    ends_at: Mapped[dt.time] = mapped_column(Time)
+    room: Mapped[str] = mapped_column(String(40), default="")
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class AttendanceDay(Base):
+    """One register: a session from the timetable, or a whole-day register when slot_id is empty."""
     __tablename__ = "attendance_days"
-    __table_args__ = (UniqueConstraint("class_id", "date"),)
+    __table_args__ = (UniqueConstraint("class_id", "date", "slot_id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"))
     date: Mapped[dt.date] = mapped_column(Date)
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
     term_id: Mapped[int | None] = mapped_column(ForeignKey("terms.id", ondelete="RESTRICT"), nullable=True, index=True)
+    slot_id: Mapped[int | None] = mapped_column(ForeignKey("timetable_slots.id", ondelete="SET NULL"), nullable=True, index=True)
+    subject_id: Mapped[int | None] = mapped_column(ForeignKey("subjects.id", ondelete="SET NULL"), nullable=True, index=True)
     entries: Mapped[list["AttendanceEntry"]] = relationship(cascade="all, delete-orphan")
 
 

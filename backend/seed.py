@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 
 from .db import create_schema, session_scope
 from .models import (Assessment, AttendanceDay, AttendanceEntry, ClassGroup, Mark, PaperSection, Question, QuestionMark, Student,
-                     Subject)
+                     Subject, TimetableSlot)
 from .paper import Q, Sec, paper_max, paper_total
 
 SAMPLE_CLASS = "Form Five (sample)"
@@ -102,9 +102,22 @@ def add_sample(seed: int | None = None) -> None:
                             continue
                         p = clamp(base(i) + (topic_off[tp[0]] + topic_off[tp[1]]) / 2 + (rnd.random() - .5) * 18, 5, 98)
                         s.add(Mark(assessment_id=a.id, student_id=st.id, score=round(p / 100 * mx)))
+        subject_ids = [x.id for x in s.scalars(select(Subject).where(Subject.is_sample.is_(True)))]
+        slots = []
+        for i, sub_id in enumerate(subject_ids):                 # a small weekly timetable
+            slot = TimetableSlot(class_id=cls.id, subject_id=sub_id, term_id=term.id, weekday=i % 5,
+                                 starts_at=dt.time(8, 0), ends_at=dt.time(9, 30), room=f"Room {i + 1}", is_sample=True)
+            s.add(slot)
+            slots.append(slot)
+        s.flush()
         start = dt.date(yr, 1, 13)
+        while start.weekday() != 0:
+            start += dt.timedelta(days=1)
         for w in range(20):
-            day = AttendanceDay(class_id=cls.id, date=start + dt.timedelta(days=7 * w), is_sample=True, term_id=term.id)
+            slot = slots[w % len(slots)] if slots else None      # registers belong to a lesson
+            date = start + dt.timedelta(days=7 * w + (slot.weekday if slot else 0))
+            day = AttendanceDay(class_id=cls.id, date=date, is_sample=True, term_id=term.id,
+                                slot_id=slot.id if slot else None, subject_id=slot.subject_id if slot else None)
             s.add(day)
             s.flush()
             for i, st in enumerate(studs):

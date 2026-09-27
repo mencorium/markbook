@@ -15,6 +15,10 @@ from ..widgets import Page, Table, confirm, error, fmt, info, label, panel, safe
 class SubjectsPage(Page):
     def __init__(self, app):
         super().__init__(app, "Subjects", "Subsidiary subjects (e.g. General Studies, BAM) are graded but not counted in the A-Level division.")
+        open_b = QPushButton("Open results")
+        open_b.clicked.connect(lambda _=False: self._open(self.table.current_id()))
+        edit_b = QPushButton("Edit")
+        edit_b.clicked.connect(lambda _=False: self.edit(self.table.current_id()))
         add = QPushButton("Add subject")
         self.b_del = QPushButton("Archive")
         self.b_restore = QPushButton("Restore")
@@ -27,10 +31,10 @@ class SubjectsPage(Page):
         self.b_del.setEnabled(False)
         add.clicked.connect(lambda _=False: self.add())
         self.b_del.clicked.connect(lambda _=False: self.remove_selected())
-        for wdg in (self.show_archived, self.b_restore, self.b_del, add):
+        for wdg in (self.show_archived, open_b, edit_b, self.b_restore, self.b_del, add):
             self.actions.addWidget(wdg)
         self.table = Table(["Subject", "Code", "Kind", "Assessments", "Average"], stretch=0, multi=True)
-        self.table.doubleClicked.connect(lambda: self.edit(self.table.current_id()))
+        self.table.doubleClicked.connect(lambda: self._open(self.table.current_id()))
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
@@ -63,6 +67,7 @@ class SubjectsPage(Page):
             return
         m = QMenu(self)
         one, archived = len(ids) == 1, self.archived_mode()
+        act_open = m.addAction("Open results") if one and not archived else None
         act_edit = m.addAction("Edit details") if one and not archived else None
         act_restore = m.addAction("Restore" if one else f"Restore {len(ids)} subjects") if archived else None
         word = "Delete permanently" if archived else "Archive"
@@ -70,7 +75,9 @@ class SubjectsPage(Page):
         chosen = m.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is None:
             return
-        if chosen is act_edit:
+        if chosen is act_open:
+            self._open(ids[0])
+        elif chosen is act_edit:
             self.edit(ids[0])
         elif chosen is act_restore:
             self.restore_selected()
@@ -98,8 +105,8 @@ class SubjectsPage(Page):
                 rows.append([s.name, s.code, "Subsidiary" if s.subsidiary else "Principal", len(as_),
                              fmt(avg(gb.assess_stats(a).mean for a in as_), "%")])
             self._assessments = {}
-            self.hint.setText("Double-click a subject to edit it. Select rows (Ctrl or Shift to pick several, Ctrl+A for all) "
-                              "and press Delete to archive, or right-click for more.")
+            self.hint.setText("Double-click a subject to see its tests, exams and cumulative results. Use Edit to change its name or code. "
+                              "Select rows (Ctrl or Shift to pick several, Ctrl+A for all) and press Delete to archive.")
         self._name_of = {s.id: s.name for s in subs}
         self.table.set_rows(rows, [s.id for s in subs], fit_height=True)
         self._selection_changed()
@@ -114,6 +121,10 @@ class SubjectsPage(Page):
         if d.exec():
             R.save_subject(None, **d.values())
             self.app.reload()
+
+    def _open(self, sid=None):
+        if sid is not None and not self.archived_mode():
+            self.app.open_subject(sid)
 
     @safe
     def edit(self, sid=None):

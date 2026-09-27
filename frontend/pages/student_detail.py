@@ -16,9 +16,10 @@ from ..widgets import Chart, Page, StatStrip, Table, confirm, fill_combo, fmt, i
 class StudentDetailPage(Page):
     def __init__(self, app):
         super().__init__(app, "Student")
-        back = QPushButton("← Students")
-        back.clicked.connect(lambda _=False: app.show_page("students"))
-        self.body.insertLayout(0, row(back, stretch_end=True))
+        self.back = QPushButton("← Back")
+        self.back.setToolTip("Alt+Left")
+        self.back.clicked.connect(lambda _=False: app.go_back())
+        self.body.insertLayout(0, row(self.back, stretch_end=True))
         for text, fn, name in [("Edit details", self.edit, None), ("Report card (PDF)", self.report, None),
                                ("Progress (Excel)", self.progress_xlsx, None), ("Archive", self.archive, "danger")]:
             b = QPushButton(text)
@@ -74,6 +75,7 @@ class StudentDetailPage(Page):
         sm, sc = gb.summary(stu), gb.scale(stu.class_id)
         rank, n = gb.position(stu)
         total, k = gb.total_marks(stu)
+        self.back.setText(f"← {self.app.back_target()}")
         self.title.setText(stu.name)
         self.subtitle.setText(f"{gb.class_name(stu.class_id)} · {sc.label}")
         big = sm.div.div if sm.div and sm.div.complete else sc.letter(sm.overall)

@@ -181,7 +181,7 @@ class Table(QTableWidget):
         self.setRowCount(0)
 
     def fit(self, max_rows: int = 18) -> None:
-        h = self.horizontalHeader().height() + 4 + sum(self.rowHeight(r) for r in range(min(self.rowCount(), max_rows)))
+        h = self.horizontalHeader().height() + 10 + sum(self.rowHeight(r) for r in range(min(self.rowCount(), max_rows)))
         self.setMinimumHeight(min(h, 620))
         self.setMaximumHeight(h if self.rowCount() <= max_rows else 16777215)
 

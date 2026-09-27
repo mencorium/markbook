@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 
-from PyQt6.QtCore import QDate, Qt
+from PyQt6.QtCore import QDate, Qt, QTime
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLineEdit,
-                             QPlainTextEdit, QTableWidgetItem, QVBoxLayout)
+                             QPlainTextEdit, QTableWidgetItem, QTimeEdit, QVBoxLayout)
 
 from backend.grading import LEVEL_LABELS, PRESETS
 from backend.phone import PhoneError, display_phone, normalize_phone
@@ -170,6 +170,68 @@ class StartTermDialog(TermDialog):
             target = self.table.item(r, 2)
             out.append({"class_id": cls.id, "action": combo.currentData(), "target": target.text().strip() if target else ""})
         return out
+
+
+class SlotDialog(_Form):
+    """One weekly lesson: subject, day and time."""
+    def __init__(self, parent, subjects, slot=None):
+        super().__init__(parent, "Edit lesson" if slot else "Add a lesson")
+        from backend.services.timetable import DAYS
+        self.subject = QComboBox()
+        for s in subjects:
+            self.subject.addItem(s.name, s.id)
+        self.day = QComboBox()
+        for i, name in enumerate(DAYS):
+            self.day.addItem(name, i)
+        self.starts = QTimeEdit()
+        self.ends = QTimeEdit()
+        for w in (self.starts, self.ends):
+            w.setDisplayFormat("HH:mm")
+        self.room = QLineEdit(slot.room if slot else "")
+        self.room.setPlaceholderText("optional, e.g. Lab 1")
+        if slot:
+            self.subject.setCurrentIndex(max(0, self.subject.findData(slot.subject_id)))
+            self.day.setCurrentIndex(slot.weekday)
+            self.starts.setTime(QTime(slot.starts_at.hour, slot.starts_at.minute))
+            self.ends.setTime(QTime(slot.ends_at.hour, slot.ends_at.minute))
+        else:
+            self.starts.setTime(QTime(8, 0))
+            self.ends.setTime(QTime(9, 30))
+        self.form.addRow("Subject", self.subject)
+        self.form.addRow("Day", self.day)
+        self.form.addRow("Starts", self.starts)
+        self.form.addRow("Ends", self.ends)
+        self.form.addRow("Room", self.room)
+        self.form.addRow("", label("Attendance for this class is recorded against these lessons, so a register always "
+                                   "belongs to a real session.", "muted", wrap=True))
+        self.finish()
+
+    def validate(self):
+        if self.subject.currentData() is None:
+            return "Add a subject first."
+        if self.ends.time() <= self.starts.time():
+            return "The lesson cannot end before it starts."
+        return None
+
+    def values(self) -> dict:
+        t = lambda w: dt.time(w.time().hour(), w.time().minute())
+        return {"subject_id": self.subject.currentData(), "weekday": self.day.currentData(),
+                "starts_at": t(self.starts), "ends_at": t(self.ends), "room": self.room.text()}
+
+
+class ChooseDialog(_Form):
+    """A single pick from a list."""
+    def __init__(self, parent, title: str, prompt: str, options: list[tuple[str, object]]):
+        super().__init__(parent, title)
+        self.combo = QComboBox()
+        for text, data in options:
+            self.combo.addItem(text, data)
+        self.form.addRow(label(prompt, "muted", wrap=True))
+        self.form.addRow(self.combo)
+        self.finish()
+
+    def value(self):
+        return self.combo.currentData()
 
 
 class ClassDialog(_Form):
