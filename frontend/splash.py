@@ -13,6 +13,7 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QApplication, QFrame, QGraphicsDropShadowEffect, QLabel, QProgressBar, QVBoxLayout, QWidget)
 
+from backend import about
 from backend.paths import icon_path
 
 from . import theme
@@ -74,11 +75,11 @@ class Splash(QWidget):
                 self.icon.setPixmap(pixmap)
         lay.addStretch(1)
         lay.addWidget(self.icon)
-        title = QLabel("Markbook")
+        title = QLabel(about.APP_NAME)
         title.setObjectName("splashTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(title)
-        self.what = QLabel("Starting…")
+        self.what = QLabel(f"version {about.VERSION}  ·  by {about.TEAM}")
         self.what.setObjectName("splashWhat")
         self.what.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.what)

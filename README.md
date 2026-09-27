@@ -1,7 +1,9 @@
 <!-- /markbook/README.md -->
-# Markbook Desktop
+# Markbook
 
-Student progress analysis for teachers and tutors: PyQt6 desktop app with a PostgreSQL database.
+**Student progress analysis for teachers** — a PyQt6 desktop app with a PostgreSQL database.
+
+Made by **Mencorium** · https://github.com/mencorium/markbook
 
 It covers subjects, students (with phone numbers), tests and exams, per-question marking with topics and choice sections, attendance, NECTA A-Level / O-Level grading and divisions, predictions and targets, topic and question analysis, class results, full report cards (PDF), Excel/CSV import and export.
 
@@ -64,6 +66,12 @@ is still available as a deliberate choice. Because registers carry their subject
 read per subject as well as overall — the subject page shows both it and how much time that subject
 gets each week. Registers taken before a lesson is removed, or before this feature existed, stay
 valid.
+
+**Help inside the app.** Press **F1** on any screen and help opens at the topic for that screen —
+recording marks, question papers, timetable and attendance, divisions and report cards, backups
+and so on. Every topic is searchable ("division", "backup", "absent"), and the same page carries
+**About**: version, the team, the GitHub link, and the build details (Python, Qt, system, database,
+schema revision, log file) with a **Copy build details** button for bug reports.
 
 **Starting up.** Markbook shows a splash with the app icon, its name, what it is doing
 ("Opening the database…", "Reading this term's marks…") and a progress bar, plus a one-line tip
@@ -217,6 +225,7 @@ markbook_desktop/
 │   ├── migrate.py             Runs pending migrations at startup
 │   ├── log.py                 Rotating log file
 │   ├── audit.py               Change history (who changed what, and when)
+│   ├── about.py               App name, version, team and build details
 │   ├── paths.py               Where logs, drafts, backups and bundled files live
 │   ├── models.py              SQLAlchemy tables
 │   ├── schemas.py             Plain dataclasses handed to the UI
@@ -245,6 +254,7 @@ markbook_desktop/
 │   ├── db_setup.py            First-run database connection dialog
 │   ├── quick_find.py          Ctrl+K student search
 │   ├── splash.py              Start-up window: progress and rotating tips
+│   ├── help_topics.py         The help text, searchable by topic
 │   ├── dialogs.py             Student (with phone), subject, assessment, scale dialogs
 │   └── pages/                 One module per screen
 └── tests/
@@ -267,3 +277,14 @@ A messaging module can read `Student.phone` directly. For example, it could send
 - **A-Level division**: best 3 principal subjects; subsidiary subjects are excluded. **O-Level**: best 7 subjects.
 - **Ranking**: students with a complete division come first, ordered by points and then average. The rest follow by average.
 - **Per-question papers**: a blank compulsory question counts as 0. In "answer any N" sections only the best N answers count.
+
+## Credits
+
+Markbook is built and maintained by **Mencorium**.
+
+- Source, releases and issue tracker: https://github.com/mencorium/markbook
+- Report a problem: https://github.com/mencorium/markbook/issues — include the build details from
+  **Help & about → Copy build details** and the log file it names.
+
+Version and team live in `backend/about.py`; the About screen, window title, splash and installer
+all read from there, so bump the version in that one file.
