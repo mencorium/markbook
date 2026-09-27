@@ -23,6 +23,7 @@ from .pages.activity import ActivityPage
 from .pages.assessments import AssessmentsPage
 from .pages.attendance import AttendancePage
 from .pages.dashboard import DashboardPage
+from .pages.help import HelpPage
 from .pages.import_export import ImportExportPage
 from .pages.mark_entry import MarkEntryPage
 from .pages.results import ResultsPage
@@ -36,14 +37,15 @@ from .pages.topics import TopicsPage
 from .widgets import fill_combo, label
 
 NAV = [("dashboard", "Overview"), ("students", "Students"), ("subjects", "Subjects"), ("assessments", "Tests & exams"),
-       ("timetable", "Timetable"), ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("activity", "Activity"), ("settings", "Settings")]
+       ("timetable", "Timetable"), ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("activity", "Activity"), ("settings", "Settings"), ("help", "Help & about")]
 
 
 class MainWindow(QMainWindow):
     def __init__(self, splash=None):
         super().__init__()
         self._splash = splash
-        self.setWindowTitle("Markbook — student progress")
+        from backend import about
+        self.setWindowTitle(f"{about.APP_NAME} {about.VERSION} — {about.TAGLINE}")
         self.resize(1320, 860)
         self.gb: Gradebook = Gradebook.load()
         self.term_id: int | None = self.gb.term.id if self.gb.term else None
@@ -82,10 +84,15 @@ class MainWindow(QMainWindow):
         find = QPushButton("🔍  Find a student")
         find.setToolTip("Ctrl+K")
         find.clicked.connect(lambda _=False: self.find_student())
+        helper = QPushButton("？  Help")
+        helper.setToolTip("F1 — help for the screen you are on")
+        helper.clicked.connect(lambda _=False: self.open_help())
         holder = QWidget()
         hv = QVBoxLayout(holder)
         hv.setContentsMargins(12, 0, 12, 8)
+        hv.setSpacing(6)
         hv.addWidget(find)
+        hv.addWidget(helper)
         holder.setStyleSheet(f"background: {theme.SURFACE};")
         sv.addWidget(holder)
         db = get_config().database_url.rsplit("@", 1)[-1]
@@ -101,7 +108,7 @@ class MainWindow(QMainWindow):
             "dashboard": DashboardPage(self), "students": StudentsPage(self), "student": StudentDetailPage(self),
             "subjects": SubjectsPage(self), "subject": SubjectDetailPage(self), "assessments": AssessmentsPage(self), "entry": MarkEntryPage(self),
             "timetable": TimetablePage(self), "attendance": AttendancePage(self), "topics": TopicsPage(self), "results": ResultsPage(self),
-            "io": ImportExportPage(self), "activity": ActivityPage(self), "settings": SettingsPage(self),
+            "io": ImportExportPage(self), "activity": ActivityPage(self), "settings": SettingsPage(self), "help": HelpPage(self),
         }
         self._say("Almost there…", 92)
         for p in self.pages.values():
@@ -113,6 +120,7 @@ class MainWindow(QMainWindow):
                 QShortcut(QKeySequence(key), self, activated=fn)
         # Alt+Left only: Backspace would be swallowed here while marks are being typed
         QShortcut(QKeySequence("Alt+Left"), self, activated=self.go_back)
+        QShortcut(QKeySequence("F1"), self, activated=self.open_help)
         self.current = "dashboard"
         self.nav.currentRowChanged.connect(self._nav_changed)
         self.nav.setCurrentRow(0)
@@ -223,6 +231,15 @@ class MainWindow(QMainWindow):
         if subject_id is not None and self._leave_ok():
             self.subject_id = subject_id
             self.show_page("subject")
+
+    def open_help(self, topic: str | None = None) -> None:
+        """F1 from anywhere: help opens at the topic for the screen you were on."""
+        page = self.current
+        if not self._leave_ok():
+            return
+        self.show_page("help")
+        helper = self.pages["help"]
+        helper.open_topic(topic) if topic else helper.open_for_page(page)
 
     def find_student(self) -> None:
         """Ctrl+K from anywhere."""

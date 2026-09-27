@@ -53,6 +53,11 @@ QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{ background: {SURFACE}; border: 1px solid {RULE}; padding: 7px 16px; margin-right: 4px; border-radius: 7px; }}
 QTabBar::tab:selected {{ background: {INK}; color: white; }}
 QScrollArea {{ border: none; background: transparent; }}
+#helpText {{ background: {SURFACE}; border: 1px solid {RULE}; border-radius: 8px; padding: 14px 18px; }}
+#helpList {{ background: {PAPER}; border: 1px solid {RULE}; border-radius: 8px; padding: 4px; outline: 0; }}
+#helpList::item {{ padding: 8px 10px; border-radius: 6px; color: {INK}; }}
+#helpList::item:hover {{ background: {GRID}; }}
+#helpList::item:selected {{ background: {INK}; color: white; font-weight: 600; }}
 #splash {{ background: transparent; }}
 #splashCard {{ background: {SURFACE}; border: 1px solid {RULE}; border-radius: 4px; }}
 #splashTitle {{ font-size: 26pt; font-weight: 800; color: {INK}; padding-top: 2px; }}
