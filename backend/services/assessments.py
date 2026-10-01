@@ -28,7 +28,7 @@ def _info(a: Assessment) -> AssessmentInfo:
         a.id, a.subject_id, a.class_id, a.type, a.name, a.date, float(a.max_marks), list(a.topics or []),
         [SectionInfo(s.id, s.name, s.pick) for s in a.sections],
         [QuestionInfo(q.id, q.label, q.topic, float(q.max_marks), q.section_id) for q in a.questions],
-        a.term_id,
+        a.term_id, a.group_set_id,
     )
 
 
@@ -52,7 +52,7 @@ def get_assessment(assessment_id: int) -> AssessmentInfo | None:
 
 def save_assessment(assessment_id: int | None, *, subject_id: int, class_id: int, type: str, name: str,
                     date: dt.date, max_marks: float | None = None, topics: list[str] | None = None,
-                    term_id: int | None = None) -> AssessmentInfo:
+                    term_id: int | None = None, group_set_id: int | None = -1) -> AssessmentInfo:
     if not name.strip():
         raise ValidationError("Give the assessment a name, such as Test 2.")
     if type not in TYPES:
@@ -61,6 +61,8 @@ def save_assessment(assessment_id: int | None, *, subject_id: int, class_id: int
         a = s.get(Assessment, assessment_id) if assessment_id else Assessment(topics=[])
         a.subject_id, a.class_id, a.type, a.name, a.date = subject_id, class_id, type, name.strip(), date
         a.term_id = term_id if term_id else _term_for(date)
+        if group_set_id != -1:                       # -1 means "leave as it is"
+            a.group_set_id = group_set_id
         if not a.questions:                               # papers derive max and topics from their questions
             if not max_marks or max_marks <= 0:
                 raise ValidationError("'Out of' must be more than 0.")
@@ -115,6 +117,38 @@ def _check_conflicts(s, assessment_id: int, expected: dict[int, float | None] | 
     more = f" and {len(clashes) - 5} more" if len(clashes) > 5 else ""
     raise ConflictError("These marks were changed elsewhere while this page was open:\n\n"
                         f"{shown}{more}\n\nReload the assessment so you can see the current marks, then make your changes again.")
+
+
+def save_group_marks(assessment_id: int, marks: dict[int, float | None],
+                     expected: dict[int, float | None] | None = None) -> dict:
+    """One mark per group, given to every member of it.
+
+    marks: {group_id: score or None}. Returns what happened, so the teacher is told how many
+    students it reached rather than just how many groups were marked."""
+    from .groups import get_set
+    a = get_assessment(assessment_id)
+    if a is None:
+        raise ValidationError("That assessment no longer exists.")
+    if not a.group_set_id:
+        raise ValidationError("This assessment is not tied to a set of groups. If its groups were deleted, "
+                              "open Edit details and choose a set — the marks already given are kept.")
+    group_set = get_set(a.group_set_id)
+    if group_set is None:
+        raise ValidationError("The groups for this assignment have been deleted. Choose another set on the assessment.")
+    by_id = {g.id: g for g in group_set.groups}
+    totals: dict[int, float | None] = {}
+    touched = 0
+    for group_id, score in marks.items():
+        group = by_id.get(group_id)
+        if group is None:
+            continue
+        if score is not None and not 0 <= score <= a.max_marks:
+            raise ValidationError(f"{group.name}: marks must be between 0 and {a.max_marks:g}.")
+        for sid in group.members:
+            totals[sid] = score
+        touched += len(group.members) if score is not None else 0
+    n = save_totals(assessment_id, totals, expected)
+    return {"students": touched, "saved": n, "groups": len([m for m in marks.values() if m is not None])}
 
 
 def save_totals(assessment_id: int, totals: dict[int, float | None], expected: dict[int, float | None] | None = None) -> int:

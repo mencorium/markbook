@@ -90,6 +90,11 @@ class AssessmentInfo:
     sections: list[SectionInfo] = field(default_factory=list)
     questions: list[QuestionInfo] = field(default_factory=list)
     term_id: int | None = None
+    group_set_id: int | None = None
+
+    @property
+    def is_group_work(self) -> bool:
+        return self.group_set_id is not None
 
     @property
     def is_paper(self) -> bool:
@@ -135,7 +140,38 @@ class AttendanceDayInfo:
     class_id: int
     date: dt.date
     roster: list[int]
-    absent: list[int]
+    absent: list[int]                          # anyone not present, whatever the reason
     term_id: int | None = None
     slot_id: int | None = None
     subject_id: int | None = None
+    status: dict = field(default_factory=dict)  # {student_id: code}
+    notes: dict = field(default_factory=dict)   # {student_id: note}
+
+    def code(self, student_id: int) -> str:
+        return self.status.get(student_id, "P")
+
+
+@dataclass
+class GroupInfo:
+    id: int
+    name: str
+    position: int
+    members: list[int] = field(default_factory=list)
+    leader: int | None = None
+
+
+@dataclass
+class GroupSetInfo:
+    id: int
+    name: str
+    class_id: int
+    subject_id: int
+    term_id: int | None
+    made_by: str
+    rules: dict = field(default_factory=dict)
+    created_at: dt.datetime | None = None
+    groups: list[GroupInfo] = field(default_factory=list)
+
+    @property
+    def size(self) -> int:
+        return sum(len(g.members) for g in self.groups)

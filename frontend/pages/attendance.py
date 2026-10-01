@@ -7,6 +7,7 @@ import datetime as dt
 from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtWidgets import QComboBox, QDateEdit, QGridLayout, QPushButton, QTableWidgetItem, QWidget
 
+from backend import attendance_codes as AC
 from backend.services import attendance as ATT
 from backend.services import timetable as TT
 
@@ -27,7 +28,7 @@ class AttendancePage(Page):
         self.date = QDateEdit(QDate.currentDate())
         self.date.setCalendarPopup(True)
         self.date.dateChanged.connect(lambda _: self._date_changed())
-        allp, save, delete = QPushButton("Everyone present"), QPushButton("Save attendance"), QPushButton("Delete this day")
+        allp, save, delete = QPushButton("Everyone present"), QPushButton("Save attendance"), QPushButton("Delete this register")
         save.setObjectName("primary")
         delete.setObjectName("danger")
         allp.clicked.connect(lambda _=False: self.all_present())
@@ -41,13 +42,14 @@ class AttendancePage(Page):
         self.whole_day.toggled.connect(lambda _: self._session_picked())
         self.to_timetable = QPushButton("Open the timetable")
         self.to_timetable.clicked.connect(lambda _=False: app.show_page("timetable"))
-        self.register = Table(["Student", "Present"], stretch=0)
+        self.register = Table(["Student", "Attendance", "Note"], stretch=0, editable=True)
         self.register.itemChanged.connect(self._changed)
+        self.legend = label("", "muted", wrap=True)
         g = QGridLayout()
         g.setSpacing(14)
         g.addWidget(panel(self.status, row(label("Date"), self.date, None, self.whole_day, self.to_timetable),
                           label("Lessons on this day", "h2"), self.sessions,
-                          row(label("Register", "h2"), None, allp, save), self.register, row(delete, None),
+                          row(label("Register", "h2"), None, allp, save), self.register, self.legend, row(delete, None),
                           stretch_end=True), 0, 0, 2, 1)
         self.lowest = Table(["Student", "Attendance"], stretch=0)
         self.lowest.doubleClicked.connect(lambda: app.open_student(self.lowest.current_id()))
@@ -136,22 +138,48 @@ class AttendancePage(Page):
         gb, cid = self.app.gb, self.app.class_id
         slot = self._slot()
         existing = ATT.get_day(cid, self._day(), slot.id if slot else None)
-        absent = set(existing.absent) if existing else set()
         studs = gb.students_in(cid)
         self._loading = True
+        self.register.clear_cell_widgets()
         self.register.setRowCount(len(studs))
         for r, s in enumerate(studs):
             n = QTableWidgetItem(s.name)
+            n.setFlags(n.flags() & ~Qt.ItemFlag.ItemIsEditable)
             n.setData(Qt.ItemDataRole.UserRole, s.id)
             self.register.setItem(r, 0, n)
-            chk = QTableWidgetItem("Present" if s.id not in absent else "Absent")
-            chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            chk.setCheckState(Qt.CheckState.Unchecked if s.id in absent else Qt.CheckState.Checked)
-            self.register.setItem(r, 1, chk)
+            code = existing.code(s.id) if existing else AC.DEFAULT
+            combo = QComboBox()
+            for c in AC.CODES:
+                combo.addItem(c.label, c.code)
+            combo.setCurrentIndex(max(0, combo.findData(AC.get(code).code)))
+            combo.currentIndexChanged.connect(self._code_changed)
+            self.register.setCellWidget(r, 1, combo)
+            self.register.setItem(r, 2, QTableWidgetItem((existing.notes.get(s.id, "") if existing else "")))
+        self.register.resizeColumnsToContents()
+        self.register.setColumnWidth(0, max(200, self.register.columnWidth(0)))
+        self.register.setColumnWidth(1, max(190, self.register.columnWidth(1)))
         self.register.fit(60)
         self._loading = False
         self.dirty = False
+        self.legend.setText("Pick a code for anyone not present. " + AC.legend()
+                            + ".  Sick, permit and suspended are excused: they do not count against a student's "
+                              "attendance, but are still recorded. Use the Note column for a reason.")
         self._status(existing is not None)
+
+    def _codes(self) -> dict:
+        out = {}
+        for r in range(self.register.rowCount()):
+            combo = self.register.cellWidget(r, 1)
+            sid = self.register.item(r, 0).data(Qt.ItemDataRole.UserRole)
+            out[sid] = combo.currentData() if combo else AC.DEFAULT
+        return out
+
+    def _code_changed(self, _=None):
+        if self._loading:
+            return
+        self.dirty = True
+        slot = self._slot()
+        self._status(ATT.get_day(self.app.class_id, self._day(), slot.id if slot else None) is not None)
 
     def _load_side(self):
         gb, cid = self.app.gb, self.app.class_id
@@ -169,7 +197,9 @@ class AttendancePage(Page):
         """Say which lesson this register belongs to, so it is never ambiguous later."""
         gb = self.app.gb
         total = self.register.rowCount()
-        present = sum(1 for r in range(total) if self.register.item(r, 1).checkState() == Qt.CheckState.Checked)
+        codes = self._codes() if total else {}
+        tally = {c.code: sum(1 for v in codes.values() if v == c.code) for c in AC.CODES}
+        present = tally.get(AC.PRESENT, 0)
         slot = self._slot()
         day = f"{self._day():%A %d %b %Y}"
         if slot:
@@ -183,15 +213,13 @@ class AttendancePage(Page):
             style = "note"
         self.status.setObjectName(style)
         self.status.setStyleSheet("")               # re-apply the stylesheet for the new object name
+        detail = ", ".join(f"{n} {AC.name(code).lower()}" for code, n in tally.items() if n and code != AC.PRESENT)
         self.status.setText(f"{what}. " + ("Already recorded; saving updates it. " if exists else "Not recorded yet. ")
-                            + f"{present} of {total} present, {total - present} absent.")
+                            + f"{present} of {total} present" + (f" — {detail}." if detail else "."))
 
     def _changed(self, item):
-        if self._loading or item.column() != 1:
+        if self._loading or item.column() != 2:      # only the note column is typed into
             return
-        self._loading = True
-        item.setText("Present" if item.checkState() == Qt.CheckState.Checked else "Absent")
-        self._loading = False
         self.dirty = True
         slot = self._slot()
         self._status(ATT.get_day(self.app.class_id, self._day(), slot.id if slot else None) is not None)
@@ -209,19 +237,26 @@ class AttendancePage(Page):
                 self.sessions.selectRow(row)
 
     def all_present(self):
+        self._loading = True
         for r in range(self.register.rowCount()):
-            self.register.item(r, 1).setCheckState(Qt.CheckState.Checked)
+            combo = self.register.cellWidget(r, 1)
+            if combo:
+                combo.setCurrentIndex(max(0, combo.findData(AC.PRESENT)))
+        self._loading = False
+        self._code_changed()
 
     @safe
     def save(self):
-        roster, absent = [], set()
+        codes = self._codes()
+        roster = list(codes)
+        notes = {}
         for r in range(self.register.rowCount()):
             sid = self.register.item(r, 0).data(Qt.ItemDataRole.UserRole)
-            roster.append(sid)
-            if self.register.item(r, 1).checkState() != Qt.CheckState.Checked:
-                absent.add(sid)
+            cell = self.register.item(r, 2)
+            if cell and cell.text().strip():
+                notes[sid] = cell.text().strip()
         slot = self._slot()
-        ATT.save_day(self.app.class_id, self._day(), roster, absent,
+        ATT.save_day(self.app.class_id, self._day(), roster, status=codes, notes=notes,
                      slot_id=slot.id if slot else None, subject_id=slot.subject_id if slot else None)
         self.dirty = False
         self.app.reload()

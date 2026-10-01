@@ -30,8 +30,8 @@ def auto_comment(gb: Gradebook, student_id: int) -> str:
         out.append("Results have improved steadily through the term — keep it up.")
     elif s.trend == "down":
         out.append("Results have dropped recently, so regular revision is advised.")
-    if s.att is not None and s.att < 85:
-        out.append(f"Attendance of {round(s.att)}% must improve.")
+    if s.att is not None and s.att < 85 and gb.att_unexcused(stu):
+        out.append(f"Attendance of {round(s.att)}% must improve.")   # excused absence is never held against them
     out.append(("Keep up the good work." if p >= 70 else "With steady effort, better results are within reach.")
                if sc.passing(p) else "Consistent effort and extra practice are needed to reach the pass mark.")
     return " ".join(out)

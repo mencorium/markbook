@@ -128,6 +128,23 @@ class MarkEntryPage(Page):
                            title="Question paper"))
         pv.addStretch(1)
         self.tabs.addTab(self.t_paper, "Mark per question")
+        # group marking: one row per group, given to every member
+        self.t_group = QWidget()
+        gv = QVBoxLayout(self.t_group)
+        gv.setContentsMargins(0, 8, 0, 0)
+        self.group_note = label("", "notice", wrap=True)
+        self.group_grid = Table(["Group", "Members", "Mark", "%", "Grade"], stretch=1, editable=True)
+        self.group_grid.itemChanged.connect(self._group_changed)
+        save_groups = QPushButton("Save group marks")
+        save_groups.setObjectName("primary")
+        save_groups.clicked.connect(lambda _=False: self.save_group_marks())
+        gv.addWidget(panel(self.group_note, row(label("One mark for each group", "h2"), None, save_groups), self.group_grid,
+                           label("Every member of a group is given its mark. Afterwards you can change any individual "
+                                 "student on the Marks tab — for someone who did more, or less, than the rest.",
+                                 "muted", wrap=True)))
+        gv.addStretch(1)
+        self.tabs.addTab(self.t_group, "Group marks")
+
 
     # ---------------- state ----------------
     @property
@@ -158,8 +175,11 @@ class MarkEntryPage(Page):
         st = gb.assess_stats(a)
         self.strip.set([(f"{st.n}/{len(self.roster())}", "marked"), (fmt(st.mean, "%"), "mean"), (fmt(st.hi, "%"), "highest"), (fmt(st.lo, "%"), "lowest"),
                         ("–" if st.pass_rate is None else f"{round(st.pass_rate)}%", f"passed ({gb.scale(a.class_id).pass_mark:g}%+)")])
-        self.tabs.setTabVisible(1, a.is_paper)
-        self.tabs.setTabText(2, "Question paper" if a.is_paper else "Mark per question")
+        self.tabs.setTabVisible(self.tabs.indexOf(self.t_an), a.is_paper)
+        self.tabs.setTabVisible(self.tabs.indexOf(self.t_group), a.is_group_work)
+        if a.is_group_work:
+            self._load_groups()
+        self.tabs.setTabText(self.tabs.indexOf(self.t_paper), "Question paper" if a.is_paper else "Mark per question")
         self.btn_pdf.setVisible(a.is_paper)
         self._load_grid()
         self._load_paper()
@@ -167,7 +187,8 @@ class MarkEntryPage(Page):
             self._load_analysis()
         self._draw_hist()
         if self.start_tab:
-            self.tabs.setCurrentIndex({"marks": 0, "analysis": 1, "paper": 2}.get(self.start_tab, 0))
+            page = {"marks": self.t_marks, "analysis": self.t_an, "paper": self.t_paper, "groups": self.t_group}
+            self.tabs.setCurrentWidget(page.get(self.start_tab, self.t_marks))
             self.start_tab = None
 
     def roster(self):
@@ -384,6 +405,85 @@ class MarkEntryPage(Page):
         self.c_hist.draw_with(lambda ax: charts.counts(ax, [f"{i * 10}–{100 if i == 9 else i * 10 + 9}" for i in range(10)], bins,
                                                        [theme.GREEN if i * 10 >= pm else theme.PEN for i in range(10)]) if st.pcts else False)
 
+    # ---------------- group marks ----------------
+    def _load_groups(self):
+        from backend.services import groups as G
+        gb, a = self.app.gb, self.a
+        gs = G.get_set(a.group_set_id)
+        self._group_set = gs
+        if gs is None:
+            self.group_note.setObjectName("note")
+            self.group_note.setStyleSheet("")
+            self.group_note.setText("The groups for this assignment have been deleted. Open Edit details and choose another "
+                                    "set — marks already entered are kept.")
+            self.group_grid.set_rows([])
+            return
+        self.group_note.setObjectName("noticeDone")
+        self.group_note.setStyleSheet("")
+        self.group_note.setText(f"“{gs.name}” — {len(gs.groups)} groups, out of {a.max_marks:g}.")
+        self._loading = True
+        self.group_grid.setRowCount(len(gs.groups))
+        sc = gb.scale(a.class_id)
+        for r, g in enumerate(gs.groups):
+            name = QTableWidgetItem(g.name)
+            name.setFlags(name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            name.setData(Qt.ItemDataRole.UserRole, g.id)
+            self.group_grid.setItem(r, 0, name)
+            who = QTableWidgetItem(", ".join(gb.students[s].name for s in g.members if s in gb.students))
+            who.setFlags(who.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.group_grid.setItem(r, 1, who)
+            marks = {gb.score(a, s) for s in g.members if gb.has_score(a, s)}
+            shared = f"{marks.pop():g}" if len(marks) == 1 else ""
+            cell = QTableWidgetItem(shared)
+            cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.group_grid.setItem(r, 2, cell)
+            self._group_row(r, sc)
+        self.group_grid.resizeColumnsToContents()
+        self.group_grid.fit(30)
+        self._loading = False
+
+    def _group_row(self, r: int, sc):
+        a = self.a
+        cell = self.group_grid.item(r, 2)
+        value = _num(cell.text() if cell else "")
+        invalid = value == "bad" or (value is not None and not 0 <= value <= a.max_marks)
+        if cell:
+            cell.setBackground(INVALID if invalid else QColor(0, 0, 0, 0))
+        pct = None if value in (None, "bad") or invalid else value / a.max_marks * 100
+        for c, text in enumerate([fmt(pct), sc.letter(pct)], start=3):
+            it = QTableWidgetItem(text)
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if c == 4 and pct is not None and not sc.passing(pct):
+                it.setForeground(QColor(theme.PEN))
+            self.group_grid.setItem(r, c, it)
+
+    def _group_changed(self, item):
+        if self._loading or item.column() != 2:
+            return
+        self._loading = True
+        self._group_row(item.row(), self.app.gb.scale(self.a.class_id))
+        self._loading = False
+        self.dirty = True
+
+    @safe
+    def save_group_marks(self):
+        a = self.a
+        marks, bad = {}, []
+        for r in range(self.group_grid.rowCount()):
+            gid = self.group_grid.item(r, 0).data(Qt.ItemDataRole.UserRole)
+            value = _num(self.group_grid.item(r, 2).text() if self.group_grid.item(r, 2) else "")
+            if value == "bad":
+                bad.append(self.group_grid.item(r, 0).text())
+            else:
+                marks[gid] = value
+        if bad:
+            return error(self, "These groups have something that is not a number:\n\n" + "\n".join(bad))
+        res = A.save_group_marks(a.id, marks)
+        self.dirty = False
+        self.app.reload()
+        info(self, f"{res['groups']} group(s) marked — {res['students']} students.")
+
     # ---------------- analysis ----------------
     def _load_analysis(self):
         gb, a = self.app.gb, self.a
@@ -578,7 +678,10 @@ class MarkEntryPage(Page):
     @safe
     def edit(self):
         gb, a = self.app.gb, self.a
-        d = AssessmentDialog(self, sorted(gb.subjects.values(), key=lambda s: s.name), sorted(gb.classes.values(), key=lambda c: c.name), a)
+        from backend.services import groups as G
+        sets = G.list_sets(a.class_id, a.subject_id, gb.term.id if gb.term else None)
+        d = AssessmentDialog(self, sorted(gb.subjects.values(), key=lambda s: s.name), sorted(gb.classes.values(), key=lambda c: c.name), a,
+                             group_sets=sets)
         if d.exec():
             v = d.values()
             v.pop("paper")

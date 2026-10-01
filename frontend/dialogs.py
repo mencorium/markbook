@@ -6,7 +6,7 @@ import datetime as dt
 
 from PyQt6.QtCore import QDate, Qt, QTime
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLineEdit,
-                             QPlainTextEdit, QTableWidgetItem, QTimeEdit, QVBoxLayout)
+                             QPlainTextEdit, QSpinBox, QTableWidgetItem, QTimeEdit, QVBoxLayout)
 
 from backend.grading import LEVEL_LABELS, PRESETS
 from backend.phone import PhoneError, display_phone, normalize_phone
@@ -172,6 +172,117 @@ class StartTermDialog(TermDialog):
         return out
 
 
+class TextDialog(_Form):
+    """One line of text."""
+    def __init__(self, parent, title: str, prompt: str, value: str = ""):
+        super().__init__(parent, title)
+        self.edit = QLineEdit(value)
+        self.form.addRow(prompt, self.edit)
+        self.finish()
+
+    def validate(self):
+        return None if self.edit.text().strip() else "Enter a name."
+
+    def value(self) -> str:
+        return self.edit.text().strip()
+
+
+class GroupSetDialog(_Form):
+    """How to form the groups: the strategy, the size, and any minimum of strong students."""
+    def __init__(self, parent, gb, class_id: int, subject_id: int):
+        super().__init__(parent, "Make groups")
+        from backend.services.groups import STRATEGIES
+        self.gb, self.class_id, self.subject_id = gb, class_id, subject_id
+        self.total = len(gb.students_in(class_id))
+        self.name = QLineEdit(f"{gb.subject_short(subject_id)} groups")
+        self.strategy = QComboBox()
+        for key, text in STRATEGIES.items():
+            self.strategy.addItem(text, key)
+        self.by = QComboBox()
+        self.by.addItem("Students per group", "size")
+        self.by.addItem("Number of groups", "count")
+        self.howmany = QSpinBox()
+        self.howmany.setRange(1, max(2, self.total))
+        self.howmany.setValue(4)
+        self.min_strong = QSpinBox()
+        self.min_strong.setRange(0, 5)
+        self.min_strong.setValue(1)
+        self.strong_grade = QComboBox()
+        scale = gb.scale(class_id)
+        for g in scale.grades:
+            self.strong_grade.addItem(f"{g} or better", g)
+        self.strong_grade.setCurrentIndex(min(1, self.strong_grade.count() - 1))
+        self.outcome = label("", "muted", wrap=True)
+        for w in (self.strategy, self.by, self.howmany, self.min_strong, self.strong_grade):
+            signal = w.currentIndexChanged if isinstance(w, QComboBox) else w.valueChanged
+            signal.connect(lambda _=0: self._preview())
+        self.form.addRow("Name", self.name)
+        self.form.addRow("How to form them", self.strategy)
+        self.form.addRow("Decide by", self.by)
+        self.form.addRow("How many", self.howmany)
+        self.form.addRow("Strong students per group, at least", self.min_strong)
+        self.form.addRow("Count as strong", self.strong_grade)
+        self.form.addRow("", self.outcome)
+        self.finish()
+        self._preview()
+
+    def _preview(self):
+        from backend.services.groups import MANUAL, group_count, plan_groups
+        v = self.values()
+        k = group_count(self.total, v["size"], v["count"])
+        base = f"{self.total} students into {k} group(s) of about {-(-self.total // k)}."
+        if v["strategy"] == MANUAL:
+            self.outcome.setText(base + " They start empty for you to fill.")
+            return
+        try:
+            plan = plan_groups(self.gb, self.class_id, self.subject_id, strategy=v["strategy"], size=v["size"],
+                               count=v["count"], min_strong=v["min_strong"], strong_grade=v["strong_grade"])
+        except Exception:  # noqa: BLE001 - the preview must never block the dialog
+            self.outcome.setText(base)
+            return
+        marks = [plan.average(g) for g in plan.groups]
+        real = [m for m in marks if m is not None]
+        spread = f" Group averages would run {min(real):.0f}–{max(real):.0f}%." if len(real) > 1 else ""
+        self.outcome.setText(base + spread + ("  " + " ".join(plan.warnings) if plan.warnings else ""))
+
+    def validate(self):
+        return None if self.name.text().strip() else "Give this set of groups a name."
+
+    def values(self) -> dict:
+        by = self.by.currentData()
+        return {"name": self.name.text().strip(), "strategy": self.strategy.currentData(),
+                "size": self.howmany.value() if by == "size" else None,
+                "count": self.howmany.value() if by == "count" else None,
+                "min_strong": self.min_strong.value(), "strong_grade": self.strong_grade.currentData()}
+
+
+class GroupRuleDialog(_Form):
+    """Two students who should always be together, or never."""
+    def __init__(self, parent, students):
+        super().__init__(parent, "Keep together or apart")
+        from backend.services.groups import APART, TOGETHER
+        self.kind = QComboBox()
+        self.kind.addItem("Keep apart — never in the same group", APART)
+        self.kind.addItem("Keep together — always in the same group", TOGETHER)
+        self.a, self.b = QComboBox(), QComboBox()
+        for combo in (self.a, self.b):
+            for stu in students:
+                combo.addItem(stu.name, stu.id)
+        if self.b.count() > 1:
+            self.b.setCurrentIndex(1)
+        self.form.addRow("Rule", self.kind)
+        self.form.addRow("Student", self.a)
+        self.form.addRow("and", self.b)
+        self.form.addRow("", label("Applied whenever groups are made for this subject.", "muted", wrap=True))
+        self.finish()
+
+    def validate(self):
+        return "Pick two different students." if self.a.currentData() == self.b.currentData() else None
+
+    def values(self) -> dict:
+        return {"kind": self.kind.currentData(), "a": self.a.currentData(), "b": self.b.currentData()}
+
+
 class SlotDialog(_Form):
     """One weekly lesson: subject, day and time."""
     def __init__(self, parent, subjects, slot=None):
@@ -307,7 +418,7 @@ class SubjectDialog(_Form):
 
 
 class AssessmentDialog(_Form):
-    def __init__(self, parent, subjects, classes, a=None, class_id=None, topics_for=None):
+    def __init__(self, parent, subjects, classes, a=None, class_id=None, topics_for=None, group_sets=None):
         super().__init__(parent, "Edit assessment" if a else "New assessment")
         self.subject = QComboBox()
         for s in subjects:
@@ -329,6 +440,7 @@ class AssessmentDialog(_Form):
         self.topics = QLineEdit(", ".join(a.topics) if a else "")
         self.topics.setPlaceholderText("e.g. Arrays, Sorting")
         self.paper = QCheckBox("Mark per question, with a topic for each question")
+        self.group_set = QComboBox()
         if a:
             self.subject.setCurrentIndex(max(0, self.subject.findData(a.subject_id)))
             self.cls.setCurrentIndex(max(0, self.cls.findData(a.class_id)))
@@ -346,8 +458,18 @@ class AssessmentDialog(_Form):
         self.form.addRow("Date", self.date)
         self.form.addRow("Out of", self.max)
         self.form.addRow("Topics covered", self.topics)
+        self.form.addRow("Group work", self.group_set)
         if is_paper:
             self.form.addRow("", label("Out of and topics come from the question paper.", "muted"))
+        sets = group_sets or []
+        self.group_set.addItem("Individual work — each student marked separately", None)
+        for gs in sets:
+            self.group_set.addItem(f"{gs.name} · {len(gs.groups)} groups", gs.id)
+        if a and a.group_set_id:
+            i = self.group_set.findData(a.group_set_id)
+            self.group_set.setCurrentIndex(i if i >= 0 else 0)
+        if not sets:
+            self.group_set.setToolTip("Make groups for this subject on the Groups page first.")
         if not a:
             self.form.addRow("", self.paper)
         self.form.addRow("", label("Exams count as the exam part of the final mark; tests, quizzes and assignments as continuous assessment.", "muted", wrap=True))
@@ -364,7 +486,8 @@ class AssessmentDialog(_Form):
         q = self.date.date()
         return {"subject_id": self.subject.currentData(), "class_id": self.cls.currentData(), "type": self.type.currentText(),
                 "name": self.name.text(), "date": dt.date(q.year(), q.month(), q.day()), "max_marks": self.max.value(),
-                "topics": [t.strip() for t in self.topics.text().split(",") if t.strip()], "paper": self.paper.isChecked()}
+                "topics": [t.strip() for t in self.topics.text().split(",") if t.strip()], "paper": self.paper.isChecked(),
+                "group_set_id": self.group_set.currentData()}
 
 
 class ScaleDialog(_Form):

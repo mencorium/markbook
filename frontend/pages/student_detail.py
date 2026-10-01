@@ -35,6 +35,8 @@ class StudentDetailPage(Page):
         self.body.addLayout(head)
         self.strip = StatStrip()
         self.body.addWidget(self.strip)
+        self.attendance_detail = label("", "muted", wrap=True)
+        self.body.addWidget(self.attendance_detail)
         self.subj = QComboBox()
         self.subj.currentIndexChanged.connect(lambda _: self._draw_progress())
         self.c_prog = Chart(3.2)
@@ -86,7 +88,8 @@ class StudentDetailPage(Page):
         self.strip.set([(fmt(sm.overall, "%"), f"average, grade {sc.letter(sm.overall)}"), (f"{rank or '–'} of {n}", "position in class"),
                         (f"{total:.1f} / {k * 100}" if k else "–", "total marks"),
                         *([(f"Div {sm.pred_div.div}" if sm.pred_div and sm.pred_div.complete else "–", "predicted division")] if sc.div else []),
-                        (fmt(sm.att, "%"), "attendance")])
+                        (fmt(sm.att, "%"), "attendance" + (" (excused absence not counted)" if gb.att_unexcused(stu) == 0
+                                                          and sm.att is not None and gb.att_present_rate(stu) != sm.att else ""))])
         subs = sorted(sm.subs, key=gb.subject_name)
         fill_combo(self.subj, [(gb.subject_name(s), s) for s in subs], self.subj.currentData(), blank="All subjects")
         self._draw_progress()
@@ -98,6 +101,8 @@ class StudentDetailPage(Page):
         as_ = [a for a in gb.student_assessments(stu) if gb.has_score(a, stu.id)][::-1][:10]
         self.recent.set_rows([[a.date.isoformat(), a.name, gb.subject_name(a.subject_id), fmt(gb.pct(a, stu.id), "%"), sc.letter(gb.pct(a, stu.id))] for a in as_],
                              center_from=3, fit_height=True)
+        self.attendance_detail.setText("Register: " + gb.att_summary(stu)
+                                       + (f"  ·  {gb.att_unexcused(stu)} unexplained" if gb.att_unexcused(stu) else ""))
         self.remarks.setPlainText(stu.remarks)
 
     def _draw_progress(self):

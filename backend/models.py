@@ -90,6 +90,7 @@ class Assessment(Base):
     topics: Mapped[Any] = mapped_column(JSONType, default=list)            # whole-test tags (non-paper)
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
     term_id: Mapped[int | None] = mapped_column(ForeignKey("terms.id", ondelete="RESTRICT"), nullable=True, index=True)
+    group_set_id: Mapped[int | None] = mapped_column(ForeignKey("group_sets.id", ondelete="SET NULL"), nullable=True, index=True)
 
     sections: Mapped[list["PaperSection"]] = relationship(cascade="all, delete-orphan", order_by="PaperSection.position")
     questions: Mapped[list["Question"]] = relationship(cascade="all, delete-orphan", order_by="Question.position")
@@ -167,11 +168,58 @@ class AttendanceDay(Base):
 
 
 class AttendanceEntry(Base):
-    """One row per student expected that day (the roster); present=False means absent."""
+    """One row per student expected at that session. status is an attendance code:
+    P present, A absent, S sick, PM permit, SS suspended (see backend/attendance_codes.py)."""
     __tablename__ = "attendance_entries"
     day_id: Mapped[int] = mapped_column(ForeignKey("attendance_days.id", ondelete="CASCADE"), primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), primary_key=True)
-    present: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(2), default="P")
+    note: Mapped[str] = mapped_column(String(120), default="")      # "doctor's note", "funeral"…
+
+
+class GroupSet(Base):
+    """A set of groups for one subject in one class and term — "CS project groups"."""
+    __tablename__ = "group_sets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"), index=True)
+    subject_id: Mapped[int] = mapped_column(ForeignKey("subjects.id", ondelete="CASCADE"), index=True)
+    term_id: Mapped[int | None] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), nullable=True, index=True)
+    made_by: Mapped[str] = mapped_column(String(20), default="balanced")    # how it was generated
+    rules: Mapped[Any] = mapped_column(JSONType, default=dict)              # what was asked for, so it can be redone
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    groups: Mapped[list["StudentGroup"]] = relationship(cascade="all, delete-orphan", order_by="StudentGroup.position")
+
+
+class StudentGroup(Base):
+    __tablename__ = "student_groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    set_id: Mapped[int] = mapped_column(ForeignKey("group_sets.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    members: Mapped[list["GroupMember"]] = relationship(cascade="all, delete-orphan")
+
+
+class GroupMember(Base):
+    """The pair of columns is the primary key, which already keeps a student out of a group twice."""
+    __tablename__ = "group_members"
+    group_id: Mapped[int] = mapped_column(ForeignKey("student_groups.id", ondelete="CASCADE"), primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), primary_key=True)
+    is_leader: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GroupRule(Base):
+    """Students to keep together, or apart, whenever groups are generated for this subject."""
+    __tablename__ = "group_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("classes.id", ondelete="CASCADE"), index=True)
+    subject_id: Mapped[int | None] = mapped_column(ForeignKey("subjects.id", ondelete="CASCADE"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(10))                            # 'together' or 'apart'
+    student_a: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"))
+    student_b: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"))
 
 
 class AuditLog(Base):

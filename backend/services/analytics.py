@@ -10,6 +10,7 @@ from statistics import mean
 from sqlalchemy import select
 
 from ..db import session_scope
+from .. import attendance_codes as AC
 from ..grading import Division, Scale, make_scale
 from ..models import Assessment, AttendanceDay, ClassGroup, Mark, Question, QuestionMark, Student, Subject
 from ..paper import Q, Sec, paper_total
@@ -172,7 +173,7 @@ class Gradebook:
             assessments = [AssessmentInfo(a.id, a.subject_id, a.class_id, a.type, a.name, a.date, float(a.max_marks), list(a.topics or []),
                                           [SectionInfo(x.id, x.name, x.pick) for x in a.sections],
                                           [QuestionInfo(q.id, q.label, q.topic, float(q.max_marks), q.section_id) for q in a.questions],
-                                          a.term_id)
+                                          a.term_id, a.group_set_id)
                            for a in s.scalars(select(Assessment).where(Assessment.term_id == term.id) if term else select(Assessment))
                            if a.subject_id in subjects]          # archived subjects and other terms drop out here
             keep = {a.id for a in assessments}
@@ -185,7 +186,10 @@ class Gradebook:
                 if aid in keep:
                     qmarks.setdefault(aid, {}).setdefault(qm.student_id, {})[qm.question_id] = float(qm.score)
             days = [AttendanceDayInfo(d.id, d.class_id, d.date, [e.student_id for e in d.entries],
-                                      [e.student_id for e in d.entries if not e.present], d.term_id, d.slot_id, d.subject_id)
+                                      [e.student_id for e in d.entries if not AC.is_present(e.status)],
+                                      d.term_id, d.slot_id, d.subject_id,
+                                      {e.student_id: e.status for e in d.entries},
+                                      {e.student_id: e.note or "" for e in d.entries if e.note})
                     for d in s.scalars(select(AttendanceDay).where(AttendanceDay.term_id == term.id) if term else select(AttendanceDay))]
         return cls(get_settings(), classes, subjects, students, assessments, totals, qmarks, days, term)
 
@@ -336,27 +340,59 @@ class Gradebook:
         return self._m(("ast", a.id), build)
 
     # ---------------- attendance ----------------
-    def att_rate(self, stu: StudentInfo, after=None, upto=None, subject_id: int | None = None) -> float | None:
-        """Across every register, or only the sessions of one subject."""
-        exp = pres = 0
+    def _registers(self, stu: StudentInfo, after=None, upto=None, subject_id: int | None = None):
         for d in self.days:
             if stu.id not in d.roster or (after and d.date <= after) or (upto and d.date > upto):
                 continue
             if subject_id and d.subject_id != subject_id:
                 continue
-            exp += 1
-            pres += stu.id not in d.absent
-        return pres / exp * 100 if exp else None
+            yield d
+
+    def att_counts(self, stu: StudentInfo, after=None, upto=None, subject_id: int | None = None) -> dict[str, int]:
+        """How many of each code, so a record can be read rather than reduced to one number."""
+        counts = {c.code: 0 for c in AC.CODES}
+        for d in self._registers(stu, after, upto, subject_id):
+            counts[AC.get(d.code(stu.id)).code] += 1
+        return counts
+
+    def att_rate(self, stu: StudentInfo, after=None, upto=None, subject_id: int | None = None) -> float | None:
+        """Attendance for judging a student by: sick, permit and suspension are excused, so they
+        are left out of the sum entirely rather than counted as if the student chose to stay away."""
+        counts = self.att_counts(stu, after, upto, subject_id)
+        counted = counts[AC.PRESENT] + counts[AC.ABSENT]
+        return counts[AC.PRESENT] / counted * 100 if counted else None
+
+    def att_present_rate(self, stu: StudentInfo, after=None, upto=None, subject_id: int | None = None) -> float | None:
+        """The plain figure: sessions attended out of sessions expected, whatever the reason."""
+        counts = self.att_counts(stu, after, upto, subject_id)
+        total = sum(counts.values())
+        return counts[AC.PRESENT] / total * 100 if total else None
+
+    def att_unexcused(self, stu: StudentInfo, subject_id: int | None = None) -> int:
+        return self.att_counts(stu, subject_id=subject_id)[AC.ABSENT]
+
+    def att_summary(self, stu: StudentInfo, subject_id: int | None = None) -> str:
+        """"18 present · 2 absent · 1 sick" — only the codes that actually occurred."""
+        counts = self.att_counts(stu, subject_id=subject_id)
+        parts = [f"{n} {AC.name(code).lower()}" for code, n in counts.items() if n]
+        return " · ".join(parts) if parts else "no registers yet"
 
     def class_att(self, class_id: int, subject_id: int | None = None) -> float | None:
-        exp = pres = 0
+        """Excused absences are left out, to match how a student's own rate is worked out."""
+        present = counted = 0
         for d in self.days:
             if d.class_id != class_id or (subject_id and d.subject_id != subject_id):
                 continue
-            r = [sid for sid in d.roster if sid in self.students]
-            exp += len(r)
-            pres += sum(1 for sid in r if sid not in d.absent)
-        return pres / exp * 100 if exp else None
+            for sid in d.roster:
+                if sid not in self.students:
+                    continue
+                code = AC.get(d.code(sid))
+                if code.here:
+                    present += 1
+                    counted += 1
+                elif not code.excused:
+                    counted += 1
+        return present / counted * 100 if counted else None
 
     def at_risk(self, stu: StudentInfo) -> list[str]:
         sc, s, why = self.scale(stu.class_id), self.summary(stu), []
@@ -368,7 +404,8 @@ class Gradebook:
         if fails and sc.passing(s.overall):
             why.append("failing " + ", ".join(fails))
         if s.att is not None and s.att < 80:
-            why.append(f"attendance {round(s.att)}%")
+            missed = self.att_unexcused(stu)
+            why.append(f"attendance {round(s.att)}%" + (f" ({missed} unexplained)" if missed else ""))
         if s.behind:
             why.append("behind target in " + ", ".join(s.behind))
         return why

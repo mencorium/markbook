@@ -168,6 +168,23 @@ def annual_sheets(book, null_reg: bool = True, show: str = "marks") -> list[Shee
     return out
 
 
+def groups_sheet(gb: Gradebook, gs) -> Sheet:
+    """One row per student, in group order, with the mark the balance was based on."""
+    from .groups import rank_students
+    ranked = {r.student_id: r for r in rank_students(gb, gs.class_id, gs.subject_id, gs.rules.get("strong_grade"))}
+    sc = gb.scale(gs.class_id)
+    body, n = [], 0
+    for g in gs.groups:
+        for sid in g.members:
+            r = ranked.get(sid)
+            n += 1
+            body.append([n, g.name, r.name if r else "?", (r.mark and r1(r.mark)) if r else "",
+                         sc.letter(r.mark) if r and r.mark is not None else ""])
+    return Sheet(f"{gb.subject_short(gs.subject_id)} groups",
+                 _meta(gb, gs.class_id, f"Subject: {gb.subject_name(gs.subject_id)}", f"Groups: {gs.name}"),
+                 ["S/N", "Group", "Student Name", "Mark %", "Grade"], body, left=(1, 2))
+
+
 def class_list_sheet(gb: Gradebook, class_id: int, null_reg: bool = True) -> Sheet:
     return Sheet("Class list", _meta(gb, class_id, "Report: Class list"), ["S/N", "Reg. No.", "Student Name", "Phone"],
                  [[i + 1, reg_of(s.reg_no, null_reg), s.name, display_phone(s.phone)] for i, s in enumerate(gb.students_in(class_id))], left=(1, 2, 3))

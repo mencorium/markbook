@@ -45,8 +45,10 @@ class AssessmentsPage(Page):
         gb = self.app.gb
         if not gb.subjects or not gb.classes:
             return error(self, "Add at least one subject and one student (which creates the class) first.")
+        from backend.services import groups as G
+        sets = G.list_sets(self.app.class_id, term_id=gb.term.id if gb.term else None) if self.app.class_id else []
         d = AssessmentDialog(self, sorted(gb.subjects.values(), key=lambda s: s.name), sorted(gb.classes.values(), key=lambda c: c.name),
-                             class_id=self.app.class_id)
+                             class_id=self.app.class_id, group_sets=sets)
         if d.exec():
             v = d.values()
             paper = v.pop("paper")

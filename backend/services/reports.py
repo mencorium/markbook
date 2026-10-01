@@ -111,17 +111,22 @@ def _report_story(gb: Gradebook, student_id: int, history: bool, width: float) -
     avg_txt = "–" if sm.overall is None else f"{sm.overall:.1f}%  (grade {sc.letter(sm.overall)})"
     div_txt = (f"{sm.div.div}  ({sm.div.points} points)" if sm.div.complete else sm.div.text()) if sm.div else None
     att_txt = "–" if sm.att is None else f"{round(sm.att)}%"
+    att_detail = gb.att_summary(stu)
     info = [["Name", stu.name, "Reg. No.", stu.reg_no or "–"],
             ["Class", gb.class_name(stu.class_id), "Students in class", str(len(gb.students_in(stu.class_id)))],
             ["Total marks", f"{total:.1f} out of {k * 100}" if k else "–", "Position in class", pos],
             ["Average", avg_txt, "Division" if sc.div else "Attendance", div_txt or att_txt if sc.div else att_txt]]
     if sc.div:
         info.append(["Attendance", att_txt, "Grading", sc.label])
+    info.append(["Register", att_detail, "", ""])          # the reasons, not just the figure
+    register_row = len(info) - 1
     half = (width - 62 * mm) / 2
     it = Table(info, colWidths=[28 * mm, half, 34 * mm, half])
     it.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, LINE), ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
                             ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9), ("FONT", (2, 0), (2, -1), "Helvetica-Bold", 9),
                             ("BACKGROUND", (0, 0), (0, -1), SOFT), ("BACKGROUND", (2, 0), (2, -1), SOFT),
+                            ("SPAN", (1, register_row), (3, register_row)),    # the register reads across
+                            ("BACKGROUND", (2, register_row), (3, register_row), colors.white),
                             ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
     story += [it, Spacer(1, 8)]
     w = gb.settings.get("ca_weight", 40)

@@ -23,6 +23,7 @@ from .pages.activity import ActivityPage
 from .pages.assessments import AssessmentsPage
 from .pages.attendance import AttendancePage
 from .pages.dashboard import DashboardPage
+from .pages.groups import GroupsPage
 from .pages.help import HelpPage
 from .pages.import_export import ImportExportPage
 from .pages.mark_entry import MarkEntryPage
@@ -37,7 +38,7 @@ from .pages.topics import TopicsPage
 from .widgets import fill_combo, label
 
 NAV = [("dashboard", "Overview"), ("students", "Students"), ("subjects", "Subjects"), ("assessments", "Tests & exams"),
-       ("timetable", "Timetable"), ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("activity", "Activity"), ("settings", "Settings"), ("help", "Help & about")]
+       ("groups", "Groups"), ("timetable", "Timetable"), ("attendance", "Attendance"), ("topics", "Topics"), ("results", "Results & reports"), ("io", "Import & export"), ("activity", "Activity"), ("settings", "Settings"), ("help", "Help & about")]
 
 
 class MainWindow(QMainWindow):
@@ -107,7 +108,7 @@ class MainWindow(QMainWindow):
         self.pages = {
             "dashboard": DashboardPage(self), "students": StudentsPage(self), "student": StudentDetailPage(self),
             "subjects": SubjectsPage(self), "subject": SubjectDetailPage(self), "assessments": AssessmentsPage(self), "entry": MarkEntryPage(self),
-            "timetable": TimetablePage(self), "attendance": AttendancePage(self), "topics": TopicsPage(self), "results": ResultsPage(self),
+            "groups": GroupsPage(self), "timetable": TimetablePage(self), "attendance": AttendancePage(self), "topics": TopicsPage(self), "results": ResultsPage(self),
             "io": ImportExportPage(self), "activity": ActivityPage(self), "settings": SettingsPage(self), "help": HelpPage(self),
         }
         self._say("Almost there…", 92)

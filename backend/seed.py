@@ -121,7 +121,11 @@ def add_sample(seed: int | None = None) -> None:
             s.add(day)
             s.flush()
             for i, st in enumerate(studs):
-                s.add(AttendanceEntry(day_id=day.id, student_id=st.id, present=rnd.random() <= presence[i]))
+                if rnd.random() <= presence[i]:
+                    code = "P"
+                else:                                   # a realistic mix of reasons, not all plain absence
+                    code = rnd.choices(["A", "S", "PM"], weights=[6, 3, 1])[0]
+                s.add(AttendanceEntry(day_id=day.id, student_id=st.id, status=code))
         math = s.scalar(select(Subject).where(Subject.code == "MATH"))
         for st in studs[:4]:
             st.targets = {str(math.id): "A"}

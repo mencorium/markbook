@@ -161,6 +161,28 @@ TOPICS: list[Topic] = [
         keywords=["subject", "cumulative", "per subject", "totals", "position", "trend", "open results"],
     ),
     Topic(
+        "groups", "Groups for subject work",
+        "Forming fair groups without doing it by hand.",
+        _p("Open <b>Groups</b>, choose the class and subject, then press <b>Make groups…</b>. Markbook forms them "
+           "from the class results, and shows each group's average so you can see the balance at a glance.")
+        + _bullets(
+            "<b>Balanced</b> — the default. Students are dealt down the ranking and back up again, so every group "
+            "gets a strong one, a weak one and middles. Group averages usually end up within a few points.",
+            "<b>Similar ability</b> — groups of students at the same level, for work pitched differently.",
+            "<b>Random</b> — no regard to marks.",
+            "<b>Empty</b> — the groups are made but left for you to fill.")
+        + _p("Say either how many students per group or how many groups. You can also ask for a minimum number of "
+             "<b>strong</b> students in each one, and set what counts as strong — B or better, say. If there are not "
+             "enough to go round, Markbook says so rather than pretending.")
+        + _p("<b>Keep together / keep apart</b> holds for two students every time groups are made for that subject — "
+             "useful for a pair who cannot work together. Afterwards, right-click anyone to move them.")
+        + _p("<b>Marking group work.</b> Create the assignment and set <b>Group work</b> to your set of groups. A "
+             "<b>Group marks</b> tab appears: enter one mark per group and every member gets it. Anyone who did more, "
+             "or less, than the rest can then be changed individually on the Marks tab."),
+        page="groups",
+        keywords=["group", "groups", "project", "team", "balanced", "mixed ability", "assignment", "together", "apart"],
+    ),
+    Topic(
         "timetable", "Timetable and attendance",
         "Why a register belongs to a lesson, and how to take one.",
         _p("Set the weekly lessons for a class on the <b>Timetable</b> page: subject, day, start and end "
@@ -172,10 +194,17 @@ TOPICS: list[Topic] = [
              "lessons tells you so instead of letting you record a register that means nothing.")
         + _p("A <b>whole-day register</b> is still available for a day that is not a normal lesson, but it is "
              "a deliberate choice rather than the default.")
+        + _p("<b>Marking the register.</b> Everyone starts present; change anyone who was not, using the code that "
+             "fits — <b>P</b> present, <b>A</b> absent, <b>S</b> sick, <b>PM</b> permit, <b>SS</b> suspended — and "
+             "add a note if you want to record why.")
+        + _p("<b>Sick, permit and suspended are excused.</b> They are left out of the attendance figure a student is "
+             "judged on, so a child off ill is never flagged as at-risk and their report card never tells their "
+             "parents that attendance must improve. The absence is still recorded: the student page and report card "
+             "show the full breakdown, and the plain present-out-of-expected figure is kept too.")
         + _p("Because registers carry their subject, attendance reads per subject as well as overall — the "
              "subject page shows both, next to how much time that subject gets each week."),
         page="timetable",
-        keywords=["timetable", "attendance", "register", "lesson", "session", "absent", "present", "room"],
+        keywords=["timetable", "attendance", "register", "lesson", "session", "absent", "present", "room", "sick", "permit", "suspended", "excused"],
     ),
     Topic(
         "results", "Results, divisions and report cards",
